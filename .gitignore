@@ -43,3 +43,9 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# dotenv environment variables file
+.env*
+
+# If you're building an application, you may want to check-in your pubspec.lock
+pubspec.lock
