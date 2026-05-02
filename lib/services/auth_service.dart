@@ -5,9 +5,7 @@ import 'dart:convert';
 import '../database/database_helper.dart';
 import '../models/user.dart';
 import '../models/jadwal_obat.dart';
-import '../models/riwayat_kepatuhan.dart';
 import '../models/sesi.dart';
-import '../models/sesi_riwayat.dart';
 
 class AuthService {
   static final AuthService _instance = AuthService._internal();
@@ -17,7 +15,7 @@ class AuthService {
   final GoogleSignIn _googleSignIn = GoogleSignIn.instance;
 
   Future<void> init() async {
-    await _googleSignIn.initialize();
+    await GoogleSignIn.instance.initialize();
   }
 
   String _hash(String input) {
@@ -31,8 +29,7 @@ class AuthService {
     required String password,
   }) async {
     final key = email.toLowerCase().trim();
-    
-    // Cek apakah email sudah terdaftar di database
+
     final existingUser = await DatabaseHelper().getUserByEmail(key);
     if (existingUser != null) {
       return {
@@ -40,8 +37,7 @@ class AuthService {
         'message': 'Email sudah terdaftar',
       };
     }
-    
-    // Simpan user ke database (belum lengkap, nanti diisi di IsiDataDiri)
+
     final user = User(
       email: key,
       password: _hash(password),
@@ -51,9 +47,9 @@ class AuthService {
       jenisTbc: '',
       statusHiv: '',
     );
-    
+
     final userId = await DatabaseHelper().insertUser(user);
-    
+
     return {
       'success': true,
       'userId': userId,
@@ -66,26 +62,31 @@ class AuthService {
     required String password,
   }) async {
     final key = email.toLowerCase().trim();
-    
+
     final user = await DatabaseHelper().getUserByEmail(key);
-    
+
     if (user == null || user.password != _hash(password)) {
       return {
         'success': false,
         'message': 'Email atau kata sandi salah',
       };
     }
-    
-    // Cek apakah user sudah melengkapi data diri
-    final isCompleted = user.nama.isNotEmpty && user.umur > 0;
-    
-    // Set user yang sedang login ke DatabaseHelper
+
+    final hasDataDiri = user.nama.isNotEmpty && user.umur > 0;
+
+    final jadwal = hasDataDiri
+        ? await DatabaseHelper().getJadwalByUserId(user.id!)
+        : null;
+    final hasDataObat = jadwal != null;
+
     DatabaseHelper().setLoggedInUser(user.id!);
-    
+
     return {
       'success': true,
       'userId': user.id,
-      'isNewUser': !isCompleted,
+      'hasDataDiri': hasDataDiri,
+      'hasDataObat': hasDataObat,
+      'isNewUser': !hasDataDiri || !hasDataObat,
     };
   }
 
@@ -98,15 +99,16 @@ class AuthService {
     required String jenisTbc,
     required String statusHiv,
   }) async {
-    final user = await DatabaseHelper().getUserByEmail(email.toLowerCase().trim());
+    final user =
+        await DatabaseHelper().getUserByEmail(email.toLowerCase().trim());
     if (user == null) return false;
-    
+
     user.nama = nama;
     user.umur = umur;
     user.tanggalDiagnosis = tanggalDiagnosis;
     user.jenisTbc = jenisTbc;
     user.statusHiv = statusHiv;
-    
+
     await DatabaseHelper().updateUser(user);
     return true;
   }
@@ -116,17 +118,16 @@ class AuthService {
     required String email,
     required List<Map<String, dynamic>> sesiList,
   }) async {
-    final user = await DatabaseHelper().getUserByEmail(email.toLowerCase().trim());
+    final user =
+        await DatabaseHelper().getUserByEmail(email.toLowerCase().trim());
     if (user == null) return false;
-    
-    // Buat jadwal baru
+
     final jadwal = JadwalObat(
       userId: user.id!,
       status: 1,
     );
     final jadwalId = await DatabaseHelper().insertJadwal(jadwal);
-    
-    // Insert sesi
+
     for (var sesi in sesiList) {
       final newSesi = Sesi(
         userId: user.id!,
@@ -138,28 +139,65 @@ class AuthService {
       );
       await DatabaseHelper().insertSesi(newSesi);
     }
-    
+
     return true;
   }
 
-  // LOGIN dengan Google
   Future<Map<String, dynamic>> signInWithGoogle() async {
-    // TODO: Implement Google Sign In nanti
-    return {
-      'success': false,
-      'message': 'Fitur Google Sign In sedang dalam pengembangan',
-    };
-  }
-  
-  // MARK user completed (untuk backward compatibility)
-  void markUserCompleted(String email) {
-    // Tidak perlu karena sudah pakai SQLite
+    try {
+      final GoogleSignInAccount googleUser = await _googleSignIn.authenticate();
+
+      final email = googleUser.email.toLowerCase().trim();
+      final name = googleUser.displayName ?? '';
+      final photoUrl = googleUser.photoUrl;
+
+      var user = await DatabaseHelper().getUserByEmail(email);
+      bool isNewUser = false;
+
+      if (user == null) {
+        final newUser = User(
+          email: email,
+          password: _hash(googleUser.id),
+          nama: name,
+          umur: 0,
+          tanggalDiagnosis: DateTime.now(),
+          jenisTbc: '',
+          statusHiv: '',
+        );
+        final userId = await DatabaseHelper().insertUser(newUser);
+        user = await DatabaseHelper().getUserById(userId);
+        isNewUser = true;
+      }
+
+      DatabaseHelper().setLoggedInUser(user!.id!);
+
+      final hasDataDiri = user.nama.isNotEmpty && user.umur > 0;
+      final jadwal = hasDataDiri
+          ? await DatabaseHelper().getJadwalByUserId(user.id!)
+          : null;
+      final hasDataObat = jadwal != null;
+
+      return {
+        'success': true,
+        'userId': user.id,
+        'email': email,
+        'name': name,
+        'photoUrl': photoUrl,
+        'isNewUser': isNewUser,
+        'hasDataDiri': hasDataDiri,
+        'hasDataObat': hasDataObat,
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'message': 'Gagal login dengan Google: $e',
+      };
+    }
   }
 
-  bool isUserCompleted(String email) {
-    // Tidak perlu karena sudah pakai SQLite
-    return true;
-  }
+  void markUserCompleted(String email) {}
+
+  bool isUserCompleted(String email) => true;
 
   Future<void> signOutGoogle() async {
     try {

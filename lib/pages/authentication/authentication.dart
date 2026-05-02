@@ -3,8 +3,9 @@ import 'package:tbc_app/theme.dart';
 import 'login_page.dart';
 import 'register_page.dart';
 
-class AuthScreen extends StatefulWidget {final int initialTab; 
-  const AuthScreen({super.key, this.initialTab = 0});   // 0 = Login, 1 = Register
+class AuthScreen extends StatefulWidget {
+  final int initialTab;
+  const AuthScreen({super.key, this.initialTab = 0}); // 0 = Login, 1 = Register
 
   @override
   State<AuthScreen> createState() => _AuthScreenState();
@@ -18,7 +19,7 @@ class _AuthScreenState extends State<AuthScreen>
   void initState() {
     super.initState();
     _tab = TabController(
-        length: 2, vsync: this, 
+        length: 2, vsync: this,
         initialIndex: widget.initialTab);
   }
 
@@ -51,8 +52,11 @@ class _AuthScreenState extends State<AuthScreen>
                     ),
                   ],
                 ),
-                child: const Icon(Icons.medical_services_rounded,
-                    color: Colors.white, size: 36),
+                child: const Icon(
+                  Icons.medical_services_rounded,
+                    color: Colors.white, 
+                    size: 36
+                  ),
               ),
               const SizedBox(height: 20),
 
@@ -110,39 +114,14 @@ class _AuthScreenState extends State<AuthScreen>
         dividerColor: Colors.transparent,
         labelColor: Colors.white,
         unselectedLabelColor: AppColors.textSecondary,
-        labelStyle:
-            const TextStyle(
-              fontWeight: FontWeight.w600, 
-              fontSize: 15),
+        labelStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
         unselectedLabelStyle:
-            const TextStyle(
-              fontWeight: FontWeight.w500, 
-              fontSize: 15),
+            const TextStyle(fontWeight: FontWeight.w500, fontSize: 15),
         tabs: const [
-          Tab(text: 'Login'), 
-          Tab(text: 'Register')
+          Tab(text: 'Login'),
+          Tab(text: 'Register'),
         ],
       ),
     );
   }
-
-  Widget _footerLink(String text) => Text(
-        text,
-        style: 
-          const TextStyle(
-            fontSize: 11, 
-            color: AppColors.textSecondary
-          ),
-        );
-
-  Widget _dot() => const Padding(
-        padding: EdgeInsets.symmetric(horizontal: 6),
-        child: Text('·',
-            style:
-                TextStyle(
-                  fontSize: 11, 
-                  color: AppColors.textSecondary
-                )
-        ),
-      );
 }

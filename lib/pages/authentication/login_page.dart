@@ -3,6 +3,7 @@ import 'package:tbc_app/services/auth_service.dart';
 import 'package:tbc_app/theme.dart';
 import 'package:tbc_app/pages/home_page.dart';
 import 'package:tbc_app/pages/isi_datadiri.dart';
+import 'package:tbc_app/pages/isi_dataobat.dart';
 
 class LoginTab extends StatefulWidget {
   final TabController tabController;
@@ -69,7 +70,8 @@ class _LoginTabState extends State<LoginTab>
       }
       _navigate(
         email: _emailCtrl.text.trim(),
-        isNewUser: result['isNewUser'] as bool,
+        hasDataDiri: result['hasDataDiri'] as bool,
+        hasDataObat: result['hasDataObat'] as bool,
       );
     } else {
       _snack(result['message'], error: true);
@@ -84,10 +86,11 @@ class _LoginTabState extends State<LoginTab>
 
     if (result['success']) {
       _navigate(
-        email: result['email'],
-        name: result['name'],
-        photoUrl: result['photoUrl'],
-        isNewUser: result['isNewUser'] as bool,
+        email: result['email'] as String,
+        name: result['name'] as String? ?? '',
+        photoUrl: result['photoUrl'] as String?,
+        hasDataDiri: result['hasDataDiri'] as bool,
+        hasDataObat: result['hasDataObat'] as bool,
       );
     } else {
       _snack(result['message'], error: true);
@@ -98,13 +101,25 @@ class _LoginTabState extends State<LoginTab>
     required String email,
     String name = '',
     String? photoUrl,
-    required bool isNewUser,
+    required bool hasDataDiri,
+    required bool hasDataObat,
   }) {
-    if (isNewUser) {
+    if (!hasDataDiri) {
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
           builder: (_) => IsiDataDiriPage(
+            email: email,
+            name: name,
+            photoUrl: photoUrl,
+          ),
+        ),
+      );
+    } else if (!hasDataObat) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => IsiDataObatPage(
             email: email,
             name: name,
             photoUrl: photoUrl,
@@ -132,9 +147,9 @@ class _LoginTabState extends State<LoginTab>
         backgroundColor: error ? AppColors.error : AppColors.success,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10)
+          borderRadius: BorderRadius.circular(10),
         ),
-      )
+      ),
     );
   }
 
@@ -197,12 +212,13 @@ class _FieldLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.only(bottom: 6),
-        child: Text(text,
-            style: const TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w500,
-                color: AppColors.textPrimary
-            )
+        child: Text(
+          text,
+          style: const TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+            color: AppColors.textPrimary,
+          ),
         ),
       );
 }
@@ -251,15 +267,14 @@ class _PasswordFieldState extends State<_PasswordField> {
       controller: widget.controller,
       obscureText: _obscure,
       decoration: InputDecoration(
-        hintStyle:
-            const TextStyle(
-              color: AppColors.textSecondary, 
-              fontSize: 14
-            ),
+        hintStyle: const TextStyle(
+          color: AppColors.textSecondary,
+          fontSize: 14,
+        ),
         prefixIcon: const Icon(
           Icons.lock_outline,
-            color: AppColors.textSecondary, 
-            size: 20
+          color: AppColors.textSecondary,
+          size: 20,
         ),
         suffixIcon: IconButton(
           icon: Icon(
@@ -297,20 +312,16 @@ class _RememberMeCheckbox extends StatelessWidget {
               activeColor: AppColors.primary,
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(4)),
-              side:
-                  const BorderSide(
-                    color: AppColors.inputBorder, 
-                    width: 1.5
-                  ),
+              side: const BorderSide(
+                color: AppColors.inputBorder,
+                width: 1.5,
+              ),
             ),
           ),
           const SizedBox(width: 8),
-          const Text('Ingat saya di perangkat ini',
-              style:
-                  TextStyle(
-                    fontSize: 13, 
-                    color: AppColors.textSecondary
-                  )
+          const Text(
+            'Ingat saya di perangkat ini',
+            style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
           ),
         ],
       ),
@@ -347,16 +358,16 @@ class _PrimaryButton extends StatelessWidget {
                 width: 22,
                 height: 22,
                 child: CircularProgressIndicator(
-                    color: Colors.white, 
-                    strokeWidth: 2.5
-                )
+                  color: Colors.white,
+                  strokeWidth: 2.5,
+                ),
               )
             : Text(
-              label,
+                label,
                 style: const TextStyle(
-                    fontSize: 16, 
-                    fontWeight: FontWeight.w600
-                )
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
       ),
     );
@@ -370,25 +381,18 @@ class _OrDivider extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        const Expanded(
-          child: Divider(
-            color: AppColors.divider
-          )
-        ),
+        const Expanded(child: Divider(color: AppColors.divider)),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: Text('atau',
-              style: TextStyle(
-                  color: AppColors.textSecondary, 
-                  fontSize: 13
-              )
+          child: Text(
+            'atau',
+            style: TextStyle(
+              color: AppColors.textSecondary,
+              fontSize: 13,
+            ),
           ),
         ),
-        const Expanded(
-          child: Divider(
-            color: AppColors.divider
-          )
-        ),
+        const Expanded(child: Divider(color: AppColors.divider)),
       ],
     );
   }
@@ -408,9 +412,7 @@ class _GoogleSignInButton extends StatelessWidget {
       child: OutlinedButton(
         onPressed: isLoading ? null : onPressed,
         style: OutlinedButton.styleFrom(
-          side: const BorderSide(
-            color: AppColors.inputBorder
-          ),
+          side: const BorderSide(color: AppColors.inputBorder),
           shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12)),
         ),
@@ -419,21 +421,22 @@ class _GoogleSignInButton extends StatelessWidget {
                 width: 22,
                 height: 22,
                 child: CircularProgressIndicator(
-                    strokeWidth: 2.5, 
-                    color: AppColors.primary
-                )
+                  strokeWidth: 2.5,
+                  color: AppColors.primary,
+                ),
               )
             : Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   _GoogleLogo(),
                   const SizedBox(width: 10),
-                  const Text('Masuk dengan Google',
-                      style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w500,
-                          color: AppColors.textPrimary
-                      )
+                  const Text(
+                    'Masuk dengan Google',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w500,
+                      color: AppColors.textPrimary,
+                    ),
                   ),
                 ],
               ),
@@ -459,7 +462,9 @@ class _GooglePainter extends CustomPainter {
     void arc(Color color, double start, double sweep) {
       canvas.drawArc(
         Rect.fromCircle(center: c, radius: r * 0.82),
-        start, sweep, false,
+        start,
+        sweep,
+        false,
         Paint()
           ..color = color
           ..style = PaintingStyle.stroke

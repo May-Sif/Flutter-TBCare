@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "620712569989",
+    "project_id": "tbcare-69727",
+    "storage_bucket": "tbcare-69727.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:620712569989:android:1197d8b437e324b6fccdec",
+        "android_client_info": {
+          "package_name": "com.example.tbc_app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "620712569989-b84p6ukfc5lmnmo3oe057sf7s19tdum6.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.tbc_app",
+            "certificate_hash": "f77a3e035b2894d6ce008e5209010b39b18e768e"
+          }
+        },
+        {
+          "client_id": "620712569989-2v38cg8adsclpm8th5rmer9428qj1g1r.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDOENPgp3xjFajibk0KgVof3IxXbxpVFAo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "620712569989-2v38cg8adsclpm8th5rmer9428qj1g1r.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

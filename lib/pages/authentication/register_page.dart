@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:tbc_app/services/auth_service.dart';
 import 'package:tbc_app/theme.dart';
-import 'package:tbc_app/pages/home_page.dart';
-import 'package:tbc_app/pages/isi_datadiri.dart';
 
 class RegisterTab extends StatefulWidget {
   final TabController tabController;
@@ -48,18 +46,11 @@ class _RegisterTabState extends State<RegisterTab>
     setState(() => _loadingEmail = false);
 
     if (result['success']) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (_) => IsiDataDiriPage(
-            email: _emailCtrl.text.trim(),
-          ),
-        ),
-      );
-    } else {
-      _snack(result['message'], error: true);
+      _snack('Registrasi berhasil! Silakan login.', error: false);
       await Future.delayed(const Duration(milliseconds: 800));
       if (mounted) widget.tabController.animateTo(0);
+    } else {
+      _snack(result['message'], error: true);
     }
   }
 
@@ -70,30 +61,9 @@ class _RegisterTabState extends State<RegisterTab>
     setState(() => _loadingGoogle = false);
 
     if (result['success']) {
-      final isNewUser = result['isNewUser'] as bool;
-      if (isNewUser) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (_) => IsiDataDiriPage(
-              email: result['email'],
-              name: result['name'],
-              photoUrl: result['photoUrl'],
-            ),
-          ),
-        );
-      } else {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (_) => HomeScreen(
-              email: result['email'],
-              name: result['name'],
-              photoUrl: result['photoUrl'],
-            ),
-          ),
-        );
-      }
+      _snack('Registrasi berhasil! Silakan login.', error: false);
+      await Future.delayed(const Duration(milliseconds: 800));
+      if (mounted) widget.tabController.animateTo(0);
     } else {
       _snack(result['message'], error: true);
     }
@@ -179,7 +149,9 @@ class _FieldLabel extends StatelessWidget {
             style: const TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.w500,
-                color: AppColors.textPrimary)),
+                color: AppColors.textPrimary
+              )
+          ),
       );
 }
 
@@ -229,8 +201,11 @@ class _PasswordFieldState extends State<_PasswordField> {
       decoration: InputDecoration(
         hintStyle:
             const TextStyle(color: AppColors.textSecondary, fontSize: 14),
-        prefixIcon: const Icon(Icons.lock_outline,
-            color: AppColors.textSecondary, size: 20),
+        prefixIcon: const Icon(
+          Icons.lock_outline,
+            color: AppColors.textSecondary, 
+            size: 20
+          ),
         suffixIcon: IconButton(
           icon: Icon(
             _obscure
@@ -310,10 +285,16 @@ class _PrimaryButton extends StatelessWidget {
                 width: 22,
                 height: 22,
                 child: CircularProgressIndicator(
-                    color: Colors.white, strokeWidth: 2.5))
+                    color: Colors.white, strokeWidth: 2.5
+                    )
+                )
             : Text(label,
-                style: const TextStyle(
-                    fontSize: 16, fontWeight: FontWeight.w600)),
+                style: 
+                  const TextStyle(
+                    fontSize: 16, 
+                    fontWeight: FontWeight.w600
+                  )
+                ),
       ),
     );
   }
@@ -329,9 +310,13 @@ class _OrDivider extends StatelessWidget {
         const Expanded(child: Divider(color: AppColors.divider)),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: Text('atau',
+          child: Text(
+              'atau',
               style: TextStyle(
-                  color: AppColors.textSecondary, fontSize: 13)),
+                  color: AppColors.textSecondary, 
+                  fontSize: 13
+                )
+            ),
         ),
         const Expanded(child: Divider(color: AppColors.divider)),
       ],
@@ -362,7 +347,10 @@ class _GoogleSignInButton extends StatelessWidget {
                 width: 22,
                 height: 22,
                 child: CircularProgressIndicator(
-                    strokeWidth: 2.5, color: AppColors.primary))
+                    strokeWidth: 2.5, 
+                    color: AppColors.primary
+                  )
+                )
             : Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
@@ -372,7 +360,9 @@ class _GoogleSignInButton extends StatelessWidget {
                       style: TextStyle(
                           fontSize: 15,
                           fontWeight: FontWeight.w500,
-                          color: AppColors.textPrimary)),
+                          color: AppColors.textPrimary
+                        )
+                    ),
                 ],
               ),
       ),
