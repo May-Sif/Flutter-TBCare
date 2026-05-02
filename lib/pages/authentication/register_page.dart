@@ -38,9 +38,8 @@ class _RegisterTabState extends State<RegisterTab>
   Future<void> _register() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _loadingEmail = true);
-    await Future.delayed(const Duration(milliseconds: 600));
 
-    final result = _auth.register(
+    final result = await _auth.register(
       email: _emailCtrl.text.trim(),
       password: _passCtrl.text,
     );

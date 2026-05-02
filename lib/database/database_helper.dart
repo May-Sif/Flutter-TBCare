@@ -732,4 +732,27 @@ class DatabaseHelper {
     Database db = await database;
     await db.close();
   }
+
+  int? _currentUserId;
+
+  void setLoggedInUser(int userId) {
+    _currentUserId = userId;
+    print('✅ User ID $userId tersimpan untuk sesi ini');
+  }
+
+  int? getCurrentUserId() {
+    if (_currentUserId == null) {
+      print('⚠️ Belum ada user yang login');
+    }
+    return _currentUserId;
+  }
+
+  bool isUserLoggedIn() {
+    return _currentUserId != null;
+  }
+
+  Future<void> logout() async {
+    _currentUserId = null;
+    print('🚪 User logout');
+  }
 }

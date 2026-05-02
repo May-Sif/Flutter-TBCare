@@ -52,13 +52,8 @@ class _LoginTabState extends State<LoginTab>
   Future<void> _login() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _loadingEmail = true);
-    await Future.delayed(
-      const Duration(
-        milliseconds: 600
-      )
-    );
 
-    final result = _auth.login(
+    final result = await _auth.login(
       email: _emailCtrl.text.trim(),
       password: _passCtrl.text,
     );
@@ -77,10 +72,7 @@ class _LoginTabState extends State<LoginTab>
         isNewUser: result['isNewUser'] as bool,
       );
     } else {
-      _snack(
-        result['message'], 
-        error: true
-      );
+      _snack(result['message'], error: true);
     }
   }
 
