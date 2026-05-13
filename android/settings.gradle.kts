@@ -15,6 +15,14 @@ pluginManagement {
         mavenCentral()
         gradlePluginPortal()
     }
+<<<<<<< HEAD
+=======
+        
+    plugins {
+        id("com.google.gms.google-services") version "4.4.2" apply false
+    }
+
+>>>>>>> 0fdf93352b66e796bd8c875ff0ed3728d1033c18
 }
 
 plugins {
