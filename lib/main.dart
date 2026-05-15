@@ -1,3 +1,5 @@
+// lib/main.dart
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:tbc_app/services/auth_service.dart';
@@ -25,7 +27,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Auth App',
+      title: 'TBC Care',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.theme,
       home: const AuthScreen(),

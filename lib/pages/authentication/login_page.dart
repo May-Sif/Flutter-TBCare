@@ -88,7 +88,6 @@ class _LoginTabState extends State<LoginTab>
       _navigate(
         email: result['email'] as String,
         name: result['name'] as String? ?? '',
-        photoUrl: result['photoUrl'] as String?,
         hasDataDiri: result['hasDataDiri'] as bool,
         hasDataObat: result['hasDataObat'] as bool,
       );
@@ -100,10 +99,9 @@ class _LoginTabState extends State<LoginTab>
   void _navigate({
     required String email,
     String name = '',
-    String? photoUrl,
     required bool hasDataDiri,
     required bool hasDataObat,
-  }) {
+  }) async {
     if (!hasDataDiri) {
       Navigator.pushReplacement(
         context,
@@ -111,7 +109,6 @@ class _LoginTabState extends State<LoginTab>
           builder: (_) => IsiDataDiriPage(
             email: email,
             name: name,
-            photoUrl: photoUrl,
           ),
         ),
       );
@@ -122,7 +119,6 @@ class _LoginTabState extends State<LoginTab>
           builder: (_) => IsiDataObatPage(
             email: email,
             name: name,
-            photoUrl: photoUrl,
           ),
         ),
       );
@@ -133,7 +129,6 @@ class _LoginTabState extends State<LoginTab>
           builder: (_) => HomeScreen(
             email: email,
             name: name,
-            photoUrl: photoUrl,
           ),
         ),
       );

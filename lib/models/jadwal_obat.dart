@@ -12,16 +12,16 @@ class JadwalObat {
   factory JadwalObat.fromMap(Map<String, dynamic> map) {
     return JadwalObat(
       id: map['id'],
-      userId: map['userId'],
-      status: map['status'],
+      userId: map['user_Id'],
+      status: int.parse(map['status'].toString()),
     );
   }
 
   Map<String, dynamic> toMap() {
     return {
       'id': id,
-      'userId': userId,
-      'status': status,
+      'user_Id': userId,
+      'status': status.toString(),
     };
   }
 }

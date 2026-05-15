@@ -15,6 +15,14 @@ class AppColors {
   static const Color error = Color(0xFFE74C3C);
   static const Color success = Color(0xFF27AE60);
   static const Color divider = Color(0xFFCDD8DC);
+  static const Color primary1 = Color(0xFF577C8E); // Biru kehijauan dari desain
+  static const Color background2 = Color(0xFFF4FBFC); // Background dari desain
+  static const Color cardProfil = Color(0xFFCCEEF2); // Biru muda dari desain
+  static const Color borderProfil = Color(0xFF577C8E); // Border biru
+  static const Color cardPengingat = Color(0xFFE4E0EC); // Ungu muda dari desain
+  static const Color borderPengingat = Color(0xFFC4B5FD);
+  static const Color unguPrimary = Color(0xFF8B5CF6);
+
 }
 
 class AppTheme {

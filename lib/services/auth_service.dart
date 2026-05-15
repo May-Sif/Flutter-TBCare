@@ -3,9 +3,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:crypto/crypto.dart';
 import 'dart:convert';
 import '../database/database_helper.dart';
-import '../models/user.dart';
-import '../models/jadwal_obat.dart';
-import '../models/sesi.dart';
 
 class AuthService {
   static final AuthService _instance = AuthService._internal();
@@ -15,7 +12,8 @@ class AuthService {
   final GoogleSignIn _googleSignIn = GoogleSignIn.instance;
 
   Future<void> init() async {
-    await GoogleSignIn.instance.initialize();
+    // Method ini bisa kosong
+    print('AuthService initialized');
   }
 
   String _hash(String input) {
@@ -38,17 +36,19 @@ class AuthService {
       };
     }
 
-    final user = User(
-      email: key,
-      password: _hash(password),
-      nama: '',
-      umur: 0,
-      tanggalDiagnosis: DateTime.now(),
-      jenisTbc: '',
-      statusHiv: '',
-    );
+    final userData = {
+      'email': key,
+      'password': _hash(password),
+      'nama': '',
+      'umur': 0,
+      'tanggal_diagnosis': DateTime.now().toIso8601String(),
+      'jenis_tbc': '',
+      'status_hiv': '',
+      'tahap_pengobatan': '',
+      'masa_pengobatan': '',
+    };
 
-    final userId = await DatabaseHelper().insertUser(user);
+    final userId = await DatabaseHelper().insertUser(userData);
 
     return {
       'success': true,
@@ -65,84 +65,33 @@ class AuthService {
 
     final user = await DatabaseHelper().getUserByEmail(key);
 
-    if (user == null || user.password != _hash(password)) {
+    if (user == null || user['password'] != _hash(password)) {
       return {
         'success': false,
         'message': 'Email atau kata sandi salah',
       };
     }
 
-    final hasDataDiri = user.nama.isNotEmpty && user.umur > 0;
+    final hasDataDiri = user['nama'].isNotEmpty && user['umur'] > 0;
 
-    final jadwal = hasDataDiri
-        ? await DatabaseHelper().getJadwalByUserId(user.id!)
+    final jadwalId = hasDataDiri
+        ? await DatabaseHelper().getJadwalIdByUserId(user['id'])
         : null;
-    final hasDataObat = jadwal != null;
+    final hasDataObat = jadwalId != null;
 
-    DatabaseHelper().setLoggedInUser(user.id!);
+    DatabaseHelper().setLoggedInUser(user['id']);
 
     return {
       'success': true,
-      'userId': user.id,
+      'userId': user['id'],
+      'email': user['email'],
+      'name': user['nama'],
       'hasDataDiri': hasDataDiri,
       'hasDataObat': hasDataObat,
-      'isNewUser': !hasDataDiri || !hasDataObat,
     };
   }
 
-  // UPDATE data diri user setelah register
-  Future<bool> updateUserData({
-    required String email,
-    required String nama,
-    required int umur,
-    required DateTime tanggalDiagnosis,
-    required String jenisTbc,
-    required String statusHiv,
-  }) async {
-    final user =
-        await DatabaseHelper().getUserByEmail(email.toLowerCase().trim());
-    if (user == null) return false;
-
-    user.nama = nama;
-    user.umur = umur;
-    user.tanggalDiagnosis = tanggalDiagnosis;
-    user.jenisTbc = jenisTbc;
-    user.statusHiv = statusHiv;
-
-    await DatabaseHelper().updateUser(user);
-    return true;
-  }
-
-  // UPDATE jadwal obat
-  Future<bool> updateJadwalObat({
-    required String email,
-    required List<Map<String, dynamic>> sesiList,
-  }) async {
-    final user =
-        await DatabaseHelper().getUserByEmail(email.toLowerCase().trim());
-    if (user == null) return false;
-
-    final jadwal = JadwalObat(
-      userId: user.id!,
-      status: 1,
-    );
-    final jadwalId = await DatabaseHelper().insertJadwal(jadwal);
-
-    for (var sesi in sesiList) {
-      final newSesi = Sesi(
-        userId: user.id!,
-        namaSesi: sesi['nama_sesi'],
-        namaObat: sesi['nama_obat'],
-        waktu: sesi['waktu'],
-        status: 1,
-        jadwalId: jadwalId,
-      );
-      await DatabaseHelper().insertSesi(newSesi);
-    }
-
-    return true;
-  }
-
+  // LOGIN dengan Google
   Future<Map<String, dynamic>> signInWithGoogle() async {
     try {
       final GoogleSignInAccount googleUser = await _googleSignIn.authenticate();
@@ -155,31 +104,40 @@ class AuthService {
       bool isNewUser = false;
 
       if (user == null) {
-        final newUser = User(
-          email: email,
-          password: _hash(googleUser.id),
-          nama: name,
-          umur: 0,
-          tanggalDiagnosis: DateTime.now(),
-          jenisTbc: '',
-          statusHiv: '',
-        );
-        final userId = await DatabaseHelper().insertUser(newUser);
+        final newUserData = {
+          'email': email,
+          'password': _hash(googleUser.id),
+          'nama': name,
+          'umur': 0,
+          'tanggal_diagnosis': DateTime.now().toIso8601String(),
+          'jenis_tbc': '',
+          'status_hiv': '',
+          'tahap_pengobatan': '',
+          'masa_pengobatan': '',
+        };
+        final userId = await DatabaseHelper().insertUser(newUserData);
         user = await DatabaseHelper().getUserById(userId);
         isNewUser = true;
       }
 
-      DatabaseHelper().setLoggedInUser(user!.id!);
+      if (user == null) {
+        return {
+          'success': false,
+          'message': 'Gagal membuat akun',
+        };
+      }
 
-      final hasDataDiri = user.nama.isNotEmpty && user.umur > 0;
-      final jadwal = hasDataDiri
-          ? await DatabaseHelper().getJadwalByUserId(user.id!)
+      DatabaseHelper().setLoggedInUser(user['id']);
+
+      final hasDataDiri = user['nama'].isNotEmpty && user['umur'] > 0;
+      final jadwalId = hasDataDiri
+          ? await DatabaseHelper().getJadwalIdByUserId(user['id'])
           : null;
-      final hasDataObat = jadwal != null;
+      final hasDataObat = jadwalId != null;
 
       return {
         'success': true,
-        'userId': user.id,
+        'userId': user['id'],
         'email': email,
         'name': name,
         'photoUrl': photoUrl,
@@ -194,10 +152,6 @@ class AuthService {
       };
     }
   }
-
-  void markUserCompleted(String email) {}
-
-  bool isUserCompleted(String email) => true;
 
   Future<void> signOutGoogle() async {
     try {
@@ -219,5 +173,10 @@ class AuthService {
   Future<void> clearRememberMe() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('remember_email');
+  }
+
+  // Method helper untuk ambil user by email
+  Future<Map<String, dynamic>?> getUserByEmail(String email) async {
+    return await DatabaseHelper().getUserByEmail(email);
   }
 }

@@ -5,7 +5,7 @@ class Sesi {
   String namaObat; // 'Rifampisin', 'INH', dll
   String waktu; // format 'HH:MM'
   int status; // 1 = aktif, 0 = tidak aktif
-  int jadwalId;
+  int jadwal_Id;
 
   Sesi({
     this.id,
@@ -14,7 +14,7 @@ class Sesi {
     required this.namaObat,
     required this.waktu,
     this.status = 1,
-    required this.jadwalId,
+    required this.jadwal_Id,
   });
 
   factory Sesi.fromMap(Map<String, dynamic> map) {
@@ -25,7 +25,7 @@ class Sesi {
       namaObat: map['nama_obat'],
       waktu: map['waktu'],
       status: map['status'],
-      jadwalId: map['jadwalId'],
+      jadwal_Id: map['jadwal_Id'],
     );
   }
 
@@ -37,7 +37,7 @@ class Sesi {
       'nama_obat': namaObat,
       'waktu': waktu,
       'status': status,
-      'jadwalId': jadwalId,
+      'jadwal_Id': jadwal_Id,
     };
   }
 }

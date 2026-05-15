@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:tbc_app/theme.dart';
 import 'package:tbc_app/widgets/app_bottom_nav.dart';
+import 'package:tbc_app/database/database_helper.dart'; // IMPORT DATABASE
+import 'package:tbc_app/pages/profile_page.dart';
 
 // ─────────────────────────────────────────────
 //  HomeScreen
@@ -9,12 +11,14 @@ class HomeScreen extends StatefulWidget {
   final String email;
   final String name;
   final String? photoUrl;
+  final int? userId;  // TAMBAHKAN parameter userId
 
   const HomeScreen({
     super.key,
     required this.email,
     this.name = '',
     this.photoUrl,
+    this.userId,  // TAMBAHKAN
   });
 
   @override
@@ -23,20 +27,122 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 0;
-
-  // ── Contoh state — ganti dengan data asli dari backend ──
+  
+  // ── State untuk data dari database ──
+  bool _isLoading = true;
   bool _obatSudahDiminum = false;
-  final bool _adaEfekSamping = true;
-  final double _beratBadan = 65.2;
-  final double _selisihBerat = -4.1;
-  final String _namaObat = 'Isoniazid (INH)';
-  final String _jamObat = '08:00';
-  final String _efekKemarin = 'Kuning (kulit / mata)';
-  final String _efekHariIni = 'Belum ada laporan';
+  bool _adaEfekSamping = false;
+  double _beratBadan = 0;
+  double _selisihBerat = 0;
+  String _namaObat = '';
+  String _jamObat = '';
+  String _efekKemarin = '';
+  String _efekHariIni = '';
+  bool _sudahIsiSkrining = false;
+  List<String> _gejala = [];
+  
+  // Data tambahan
+  String _userName = '';
+  String _userEmail = '';
+  List<Map<String, dynamic>> _jadwalObat = [];
 
-  // Ganti ke `true` dan isi `_gejala` untuk menampilkan hasil skrining
-  final bool _sudahIsiSkrining = false;
-  final List<String> _gejala = ['Batuk', 'Nyeri Dada', 'Demam', 'Sesak Napas'];
+  @override
+  void initState() {
+    super.initState();
+    _loadDataFromDatabase();
+  }
+
+  Future<void> _loadDataFromDatabase() async {
+    setState(() => _isLoading = true);
+    
+    try {
+      final dbHelper = DatabaseHelper();
+      int? userId = widget.userId ?? dbHelper.getCurrentUserId();
+      
+      if (userId == null) {
+        print('❌ User ID tidak ditemukan');
+        setState(() => _isLoading = false);
+        return;
+      }
+      
+      // Ambil data lengkap user dari database
+      final userData = await dbHelper.getCompleteUserData(userId);
+      
+      // Ambil data diri
+      final dataDiri = userData['dataDiri'] as Map<String, String>? ?? {};
+      
+      // Ambil jadwal obat
+      _jadwalObat = List<Map<String, dynamic>>.from(userData['jadwalObat'] ?? []);
+      
+      // Update user info
+      _userName = dataDiri['nama'] ?? widget.name;
+      _userEmail = widget.email;
+      
+      // Ambil jadwal minum obat hari ini (cari obat dengan sesi sesuai jam sekarang atau terdekat)
+      if (_jadwalObat.isNotEmpty) {
+        // Ambil obat pertama sebagai contoh, nanti bisa disesuaikan dengan jam
+        final firstObat = _jadwalObat.first;
+        _namaObat = firstObat['namaObat'] ?? '';
+        _jamObat = firstObat['waktu'] ?? '';
+      } else {
+        _namaObat = 'Belum ada jadwal obat';
+        _jamObat = '--:--';
+      }
+      
+      // Cek status kepatuhan hari ini
+      final today = DateTime.now().toIso8601String().split('T').first;
+      final kepatuhan = await dbHelper.getKepatuhanStatus(userId, today);
+      _obatSudahDiminum = kepatuhan == 1;
+      
+      // TODO: Ambil data efek samping dari tabel efek_samping_pasien
+      // Untuk sementara pakai dummy
+      _adaEfekSamping = false; // Ganti dengan data real nanti
+      
+      // TODO: Ambil data skrining mingguan
+      _sudahIsiSkrining = false;
+      
+      setState(() => _isLoading = false);
+      
+    } catch (e) {
+      print('Error loading home data: $e');
+      setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _konfirmasiMinum() async {
+    final dbHelper = DatabaseHelper();
+    int? userId = widget.userId ?? dbHelper.getCurrentUserId();
+    
+    if (userId == null) return;
+    
+    final today = DateTime.now().toIso8601String().split('T').first;
+    final newStatus = _obatSudahDiminum ? 0 : 1;
+    
+    try {
+      await dbHelper.updateKepatuhan(userId, today, newStatus);
+      setState(() => _obatSudahDiminum = !_obatSudahDiminum);
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _obatSudahDiminum 
+              ? '✅ Terima kasih telah meminum obat hari ini!' 
+              : '⚠️ Konfirmasi dibatalkan',
+          ),
+          backgroundColor: _obatSudahDiminum ? AppColors.success : Colors.orange,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } catch (e) {
+      print('Error updating kepatuhan: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Gagal menyimpan status'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
 
   String get _greetingTime {
     final hour = DateTime.now().hour;
@@ -47,28 +153,32 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   String get _displayName {
-    final n = widget.name.isNotEmpty ? widget.name : widget.email;
+    final n = _userName.isNotEmpty ? _userName : _userEmail;
     return n.split(' ').first.split('@').first;
   }
 
-  void _konfirmasiMinum() =>
-      setState(() => _obatSudahDiminum = !_obatSudahDiminum);
-
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return Scaffold(
+        backgroundColor: AppColors.background,
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
         child: Column(
           children: [
             _TopBar(
-              name: widget.name.isNotEmpty ? widget.name : widget.email,
+              name: _userName.isNotEmpty ? _userName : _userEmail,
               photoUrl: widget.photoUrl,
+              userId: widget.userId,
             ),
             Expanded(
               child: SingleChildScrollView(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -84,7 +194,9 @@ class _HomeScreenState extends State<HomeScreen> {
                       _PeringatanGabunganCard(
                         efekKemarin: _efekKemarin,
                         efekHariIni: _efekHariIni,
-                        onTapPeringatan: () {},
+                        onTapPeringatan: () {
+                          // Navigasi ke halaman efek samping
+                        },
                       ),
                       const SizedBox(height: 16),
                     ],
@@ -98,7 +210,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     const SizedBox(height: 16),
 
-                    // ── Baris bawah — sama tinggi ──────────
+                    // ── Baris bawah ──
                     IntrinsicHeight(
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -107,6 +219,9 @@ class _HomeScreenState extends State<HomeScreen> {
                             child: _BeratBadanCard(
                               beratBadan: _beratBadan,
                               selisih: _selisihBerat,
+                              onUpdate: () {
+                                // Navigasi ke halaman input berat badan
+                              },
                             ),
                           ),
                           const SizedBox(width: 12),
@@ -115,7 +230,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               sudahIsi: _sudahIsiSkrining,
                               gejala: _gejala,
                               onIsi: () {
-                                // navigasi ke halaman skrining
+                                // Navigasi ke halaman skrining
                               },
                             ),
                           ),
@@ -139,12 +254,18 @@ class _HomeScreenState extends State<HomeScreen> {
 }
 
 // ─────────────────────────────────────────────
-//  Top Bar
+//  Top Bar (sama seperti sebelumnya)
 // ─────────────────────────────────────────────
 class _TopBar extends StatelessWidget {
   final String name;
   final String? photoUrl;
-  const _TopBar({required this.name, this.photoUrl});
+  final int? userId;
+
+  const _TopBar({
+    required this.name, 
+    this.photoUrl,
+    this.userId
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -177,7 +298,17 @@ class _TopBar extends StatelessWidget {
           ),
           const Spacer(),
           GestureDetector(
-            onTap: () {},
+            onTap: () {
+              // Navigasi ke profile
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => ProfilPage(
+                    userId: userId,
+                  ),
+                ),
+              );
+            },
             child: Container(
               width: 38,
               height: 38,
@@ -214,10 +345,7 @@ class _TopBar extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────
-//  Greeting Section  — latar ungu/lavender
-//  dengan ikon pita merah di sudut
-// ─────────────────────────────────────────────
+// ── Greeting Section (sama seperti sebelumnya) ──
 class _GreetingSection extends StatelessWidget {
   final String greeting;
   final String name;
@@ -229,13 +357,11 @@ class _GreetingSection extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
       decoration: BoxDecoration(
-        // Latar lavender/ungu muda seperti di mockup
         color: const Color(0xFFEDE7F6),
         borderRadius: BorderRadius.circular(16),
       ),
       child: Stack(
         children: [
-          // Teks kiri
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -258,8 +384,6 @@ class _GreetingSection extends StatelessWidget {
               ),
             ],
           ),
-
-          // Pita merah sudut kanan atas
           Positioned(
             right: 0,
             top: 0,
@@ -271,7 +395,6 @@ class _GreetingSection extends StatelessWidget {
   }
 }
 
-/// Ikon pita merah (ribbon) — menyerupai simbol kesadaran TBC
 class _RibbonIcon extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
@@ -293,7 +416,6 @@ class _RibbonPainter extends CustomPainter {
     final w = size.width;
     final h = size.height;
 
-    // Pita kiri
     final leftPath = Path()
       ..moveTo(w * 0.5, h * 0.38)
       ..quadraticBezierTo(w * 0.0, h * 0.18, w * 0.08, 0)
@@ -301,7 +423,6 @@ class _RibbonPainter extends CustomPainter {
       ..close();
     canvas.drawPath(leftPath, paint);
 
-    // Pita kanan
     final rightPath = Path()
       ..moveTo(w * 0.5, h * 0.38)
       ..quadraticBezierTo(w * 1.0, h * 0.18, w * 0.92, 0)
@@ -309,7 +430,6 @@ class _RibbonPainter extends CustomPainter {
       ..close();
     canvas.drawPath(rightPath, paint);
 
-    // Ekor pita bawah
     final tailPath = Path()
       ..moveTo(w * 0.5, h * 0.38)
       ..quadraticBezierTo(w * 0.28, h * 0.62, w * 0.22, h)
@@ -323,9 +443,7 @@ class _RibbonPainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter old) => false;
 }
 
-// ─────────────────────────────────────────────
-//  Card Peringatan Gabungan — background putih
-// ─────────────────────────────────────────────
+// ── PeringatanGabunganCard (sama) ──
 class _PeringatanGabunganCard extends StatelessWidget {
   final String efekKemarin;
   final String efekHariIni;
@@ -354,7 +472,6 @@ class _PeringatanGabunganCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── Header kuning ──
           Container(
             padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
             decoration: const BoxDecoration(
@@ -377,8 +494,7 @@ class _PeringatanGabunganCard extends StatelessWidget {
                 ),
                 const Spacer(),
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
                   decoration: BoxDecoration(
                     color: const Color(0xFFFF8F00),
                     borderRadius: BorderRadius.circular(20),
@@ -396,8 +512,6 @@ class _PeringatanGabunganCard extends StatelessWidget {
               ],
             ),
           ),
-
-          // ── Body putih: KEMARIN | HARI INI ──
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
             child: Row(
@@ -460,18 +574,14 @@ class _PeringatanGabunganCard extends StatelessWidget {
               ],
             ),
           ),
-
-          // ── Banner merah bawah ──
           GestureDetector(
             onTap: onTapPeringatan,
             child: Container(
               width: double.infinity,
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
               decoration: const BoxDecoration(
                 color: Color(0xFFD32F2F),
-                borderRadius:
-                    BorderRadius.vertical(bottom: Radius.circular(13)),
+                borderRadius: BorderRadius.vertical(bottom: Radius.circular(13)),
               ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -497,9 +607,7 @@ class _PeringatanGabunganCard extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────
-//  Card Obat — outer biru, inner putih untuk lingkaran
-// ─────────────────────────────────────────────
+// ── ObatCard (sama) ──
 class _ObatCard extends StatelessWidget {
   final String namaObat;
   final String jam;
@@ -518,7 +626,7 @@ class _ObatCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
       decoration: BoxDecoration(
-        color: const Color(0xFFDCEEFB), // biru muda
+        color: const Color(0xFFDCEEFB),
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
@@ -531,7 +639,6 @@ class _ObatCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header
           Row(
             children: [
               const Text(
@@ -543,8 +650,7 @@ class _ObatCard extends StatelessWidget {
               ),
               const Spacer(),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(20),
@@ -577,8 +683,6 @@ class _ObatCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16),
-
-          // ── Panel putih untuk area tombol ──────
           Container(
             width: double.infinity,
             padding: const EdgeInsets.symmetric(vertical: 24),
@@ -588,7 +692,6 @@ class _ObatCard extends StatelessWidget {
             ),
             child: Column(
               children: [
-                // Lingkaran tombol konfirmasi
                 GestureDetector(
                   onTap: onKonfirmasi,
                   child: AnimatedContainer(
@@ -599,16 +702,12 @@ class _ObatCard extends StatelessWidget {
                       shape: BoxShape.circle,
                       color: Colors.white,
                       border: Border.all(
-                        color: sudahDiminum
-                            ? AppColors.success
-                            : AppColors.primary,
+                        color: sudahDiminum ? AppColors.success : AppColors.primary,
                         width: 2.5,
                       ),
                       boxShadow: [
                         BoxShadow(
-                          color: (sudahDiminum
-                                  ? AppColors.success
-                                  : AppColors.primary)
+                          color: (sudahDiminum ? AppColors.success : AppColors.primary)
                               .withOpacity(0.18),
                           blurRadius: 16,
                           offset: const Offset(0, 4),
@@ -616,13 +715,9 @@ class _ObatCard extends StatelessWidget {
                       ],
                     ),
                     child: Icon(
-                      sudahDiminum
-                          ? Icons.check_circle_rounded
-                          : Icons.check_rounded,
+                      sudahDiminum ? Icons.check_circle_rounded : Icons.check_rounded,
                       size: 46,
-                      color: sudahDiminum
-                          ? AppColors.success
-                          : AppColors.primary,
+                      color: sudahDiminum ? AppColors.success : AppColors.primary,
                     ),
                   ),
                 ),
@@ -634,21 +729,16 @@ class _ObatCard extends StatelessWidget {
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 13,
-                    color: sudahDiminum
-                        ? AppColors.success
-                        : AppColors.textSecondary,
+                    color: sudahDiminum ? AppColors.success : AppColors.textSecondary,
                   ),
                 ),
               ],
             ),
           ),
           const SizedBox(height: 12),
-
-          // Catatan
           Container(
             width: double.infinity,
-            padding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
               color: const Color(0xFFFFFDE7),
               borderRadius: BorderRadius.circular(10),
@@ -657,16 +747,12 @@ class _ObatCard extends StatelessWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: const [
-                Icon(Icons.info_outline_rounded,
-                    color: Color(0xFFFF8F00), size: 16),
+                Icon(Icons.info_outline_rounded, color: Color(0xFFFF8F00), size: 16),
                 SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     'Pastikan diminum saat perut kosong atau sesuai anjuran dokter.',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Color(0xFF795548),
-                    ),
+                    style: TextStyle(fontSize: 12, color: Color(0xFF795548)),
                   ),
                 ),
               ],
@@ -678,15 +764,16 @@ class _ObatCard extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────
-//  Card Berat Badan — ukuran diperbesar
-// ─────────────────────────────────────────────
+// ── BeratBadanCard (dengan onUpdate callback) ──
 class _BeratBadanCard extends StatelessWidget {
   final double beratBadan;
   final double selisih;
+  final VoidCallback onUpdate;
+
   const _BeratBadanCard({
     required this.beratBadan,
     required this.selisih,
+    required this.onUpdate,
   });
 
   @override
@@ -708,26 +795,16 @@ class _BeratBadanCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Label
           Row(
             children: const [
-              Icon(Icons.monitor_weight_outlined,
-                  size: 16, color: AppColors.textSecondary),
+              Icon(Icons.monitor_weight_outlined, size: 16, color: AppColors.textSecondary),
               SizedBox(width: 4),
-              Text(
-                'Berat Badan',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: AppColors.textSecondary,
-                ),
-              ),
+              Text('Berat Badan', style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
             ],
           ),
           const SizedBox(height: 16),
-
-          // Angka berat
           Text(
-            '${beratBadan.toStringAsFixed(1)}kg',
+            beratBadan > 0 ? '${beratBadan.toStringAsFixed(1)}kg' : '-- kg',
             style: const TextStyle(
               fontSize: 30,
               fontWeight: FontWeight.bold,
@@ -736,52 +813,45 @@ class _BeratBadanCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 8),
-
-          // Selisih
-          Row(
-            children: [
-              Icon(
-                turun ? Icons.arrow_downward : Icons.arrow_upward,
-                size: 13,
-                color: turun ? const Color(0xFFD32F2F) : AppColors.success,
-              ),
-              const SizedBox(width: 2),
-              Flexible(
-                child: Text(
-                  '${selisih.abs().toStringAsFixed(1)} kg dari minggu lalu',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: turun
-                        ? const Color(0xFFD32F2F)
-                        : AppColors.success,
+          if (beratBadan > 0) ...[
+            Row(
+              children: [
+                Icon(
+                  turun ? Icons.arrow_downward : Icons.arrow_upward,
+                  size: 13,
+                  color: turun ? const Color(0xFFD32F2F) : AppColors.success,
+                ),
+                const SizedBox(width: 2),
+                Flexible(
+                  child: Text(
+                    '${selisih.abs().toStringAsFixed(1)} kg dari minggu lalu',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: turun ? const Color(0xFFD32F2F) : AppColors.success,
+                    ),
                   ),
                 ),
-              ),
-            ],
-          ),
+              ],
+            ),
+          ] else ...[
+            const Text(
+              'Belum ada data',
+              style: TextStyle(fontSize: 12, color: AppColors.textSecondary, fontStyle: FontStyle.italic),
+            ),
+          ],
           const SizedBox(height: 16),
-
-          // Tombol update
           SizedBox(
             width: double.infinity,
             child: OutlinedButton(
-              onPressed: () {
-                // navigasi ke halaman input berat badan
-              },
+              onPressed: onUpdate,
               style: OutlinedButton.styleFrom(
                 padding: const EdgeInsets.symmetric(vertical: 8),
-                side:
-                    BorderSide(color: AppColors.primary.withOpacity(0.4)),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8)),
+                side: BorderSide(color: AppColors.primary.withOpacity(0.4)),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
               ),
               child: const Text(
                 'Perbarui',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: AppColors.primary,
-                  fontWeight: FontWeight.w600,
-                ),
+                style: TextStyle(fontSize: 12, color: AppColors.primary, fontWeight: FontWeight.w600),
               ),
             ),
           ),
@@ -791,9 +861,7 @@ class _BeratBadanCard extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────
-//  Card Skrining Mingguan — diperbesar, dua kondisi
-// ─────────────────────────────────────────────
+// ── SkriningCard (sama) ──
 class _SkriningCard extends StatelessWidget {
   final bool sudahIsi;
   final List<String> gejala;
@@ -823,41 +891,29 @@ class _SkriningCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Label
           Row(
             children: const [
-              Icon(Icons.favorite_border_rounded,
-                  size: 16, color: Color(0xFFE57373)),
+              Icon(Icons.favorite_border_rounded, size: 16, color: Color(0xFFE57373)),
               SizedBox(width: 4),
               Flexible(
                 child: Text(
                   'Screening Mingguan',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: AppColors.textSecondary,
-                  ),
+                  style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
                 ),
               ),
             ],
           ),
           const SizedBox(height: 12),
-
           if (sudahIsi) ...[
-            // ── Ada data: tampilkan HIGH RISK + daftar gejala ──
             Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(
                 color: const Color(0xFFD32F2F),
                 borderRadius: BorderRadius.circular(6),
               ),
               child: const Text(
                 'HIGH RISK',
-                style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                ),
+                style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.white),
               ),
             ),
             const SizedBox(height: 10),
@@ -869,25 +925,15 @@ class _SkriningCard extends StatelessWidget {
                     Container(
                       width: 8,
                       height: 8,
-                      decoration: const BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: Color(0xFFEF9A9A),
-                      ),
+                      decoration: const BoxDecoration(shape: BoxShape.circle, color: Color(0xFFEF9A9A)),
                     ),
                     const SizedBox(width: 8),
-                    Text(
-                      g,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        color: AppColors.textPrimary,
-                      ),
-                    ),
+                    Text(g, style: const TextStyle(fontSize: 13, color: AppColors.textPrimary)),
                   ],
                 ),
               ),
             ),
           ] else ...[
-            // ── Belum ada data: ajakan isi skrining ──
             const Text(
               'ANDA BELUM\nMENGISI SKRINING\nMINGGU INI',
               style: TextStyle(
@@ -906,16 +952,12 @@ class _SkriningCard extends StatelessWidget {
                   backgroundColor: AppColors.primary,
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(vertical: 8),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8)),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   elevation: 0,
                 ),
                 child: const Text(
                   'Isi Sekarang',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                  ),
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
                 ),
               ),
             ),
