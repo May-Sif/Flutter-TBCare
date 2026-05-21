@@ -1,24 +1,22 @@
 import 'package:flutter/material.dart';
 import 'package:tbc_app/theme.dart';
 import 'package:tbc_app/widgets/app_bottom_nav.dart';
-import 'package:tbc_app/database/database_helper.dart'; // IMPORT DATABASE
+import 'package:tbc_app/database/database_helper.dart';
 import 'package:tbc_app/pages/profile_page.dart';
+import 'package:tbc_app/pages/calendar_page.dart';
 
-// ─────────────────────────────────────────────
-//  HomeScreen
-// ─────────────────────────────────────────────
 class HomeScreen extends StatefulWidget {
   final String email;
   final String name;
   final String? photoUrl;
-  final int? userId;  // TAMBAHKAN parameter userId
+  final int? userId;
 
   const HomeScreen({
     super.key,
     required this.email,
     this.name = '',
     this.photoUrl,
-    this.userId,  // TAMBAHKAN
+    this.userId,
   });
 
   @override
@@ -28,7 +26,6 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 0;
   
-  // ── State untuk data dari database ──
   bool _isLoading = true;
   bool _obatSudahDiminum = false;
   bool _adaEfekSamping = false;
@@ -41,7 +38,9 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _sudahIsiSkrining = false;
   List<String> _gejala = [];
   
-  // Data tambahan
+  bool _showTerimaKasih = false;
+  int _obatAktifIndex = 0;
+
   String _userName = '';
   String _userEmail = '';
   List<Map<String, dynamic>> _jadwalObat = [];
@@ -60,7 +59,7 @@ class _HomeScreenState extends State<HomeScreen> {
       int? userId = widget.userId ?? dbHelper.getCurrentUserId();
       
       if (userId == null) {
-        print('❌ User ID tidak ditemukan');
+        print('User ID tidak ditemukan');
         setState(() => _isLoading = false);
         return;
       }
@@ -78,9 +77,7 @@ class _HomeScreenState extends State<HomeScreen> {
       _userName = dataDiri['nama'] ?? widget.name;
       _userEmail = widget.email;
       
-      // Ambil jadwal minum obat hari ini (cari obat dengan sesi sesuai jam sekarang atau terdekat)
       if (_jadwalObat.isNotEmpty) {
-        // Ambil obat pertama sebagai contoh, nanti bisa disesuaikan dengan jam
         final firstObat = _jadwalObat.first;
         _namaObat = firstObat['namaObat'] ?? '';
         _jamObat = firstObat['waktu'] ?? '';
@@ -89,16 +86,15 @@ class _HomeScreenState extends State<HomeScreen> {
         _jamObat = '--:--';
       }
       
-      // Cek status kepatuhan hari ini
       final today = DateTime.now().toIso8601String().split('T').first;
-      final kepatuhan = await dbHelper.getKepatuhanStatus(userId, today);
-      _obatSudahDiminum = kepatuhan == 1;
-      
-      // TODO: Ambil data efek samping dari tabel efek_samping_pasien
-      // Untuk sementara pakai dummy
-      _adaEfekSamping = false; // Ganti dengan data real nanti
-      
-      // TODO: Ambil data skrining mingguan
+      final db = await dbHelper.database;
+      final sesiRows = await db.query(
+        'sesi_kepatuhan',
+        where: 'user_id = ? AND tanggal = ? AND sesi_index = ?',
+        whereArgs: [userId, today, _obatAktifIndex],
+      );
+      _obatSudahDiminum = sesiRows.isNotEmpty && (sesiRows.first['status'] as int? ?? 0) == 1;
+      _adaEfekSamping = false; 
       _sudahIsiSkrining = false;
       
       setState(() => _isLoading = false);
@@ -109,35 +105,114 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  int _konfirmasiToken = 0;
+
   Future<void> _konfirmasiMinum() async {
+    if (_showTerimaKasih) {
+      _batalkanMinum();
+      return;
+    }
+
     final dbHelper = DatabaseHelper();
     int? userId = widget.userId ?? dbHelper.getCurrentUserId();
-    
     if (userId == null) return;
-    
+
     final today = DateTime.now().toIso8601String().split('T').first;
-    final newStatus = _obatSudahDiminum ? 0 : 1;
-    
+
     try {
-      await dbHelper.updateKepatuhan(userId, today, newStatus);
-      setState(() => _obatSudahDiminum = !_obatSudahDiminum);
-      
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            _obatSudahDiminum 
-              ? '✅ Terima kasih telah meminum obat hari ini!' 
-              : '⚠️ Konfirmasi dibatalkan',
-          ),
-          backgroundColor: _obatSudahDiminum ? AppColors.success : Colors.orange,
-          duration: const Duration(seconds: 2),
-        ),
+      final db = await dbHelper.database;
+      final existing = await db.query(
+        'sesi_kepatuhan',
+        where: 'user_id = ? AND tanggal = ? AND sesi_index = ?',
+        whereArgs: [userId, today, _obatAktifIndex],
       );
+      if (existing.isNotEmpty) {
+        await db.update(
+          'sesi_kepatuhan',
+          {'status': 1},
+          where: 'id = ?',
+          whereArgs: [existing.first['id']],
+        );
+      } else {
+        await db.insert('sesi_kepatuhan', {
+          'user_id': userId,
+          'tanggal': today,
+          'sesi_index': _obatAktifIndex,
+          'status': 1,
+        });
+      }
+      final allSesi = await db.query(
+        'sesi_kepatuhan',
+        where: 'user_id = ? AND tanggal = ?',
+        whereArgs: [userId, today],
+      );
+      final totalObat = _jadwalObat.length;
+      final sudahSemua = allSesi.where((r) => (r['status'] as int? ?? 0) == 1).length == totalObat;
+      await dbHelper.updateKepatuhan(userId, today, sudahSemua ? 1 : 0);
+
+      final token = ++_konfirmasiToken;
+      setState(() {
+        _obatSudahDiminum = true;
+        _showTerimaKasih = true;
+      });
+
+      Future.delayed(const Duration(seconds: 5), () {
+        if (!mounted) return;
+        if (_konfirmasiToken != token) return;
+        setState(() {
+          _showTerimaKasih = false;
+          _obatSudahDiminum = false;
+          if (_jadwalObat.isNotEmpty) {
+            _obatAktifIndex = (_obatAktifIndex + 1) % _jadwalObat.length;
+            _namaObat = _jadwalObat[_obatAktifIndex]['namaObat'] ?? '';
+            _jamObat = _jadwalObat[_obatAktifIndex]['waktu'] ?? '';
+          }
+        });
+      });
     } catch (e) {
-      print('Error updating kepatuhan: $e');
+      debugPrint('Error updating: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Gagal menyimpan status'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Future<void> _batalkanMinum() async {
+    final dbHelper = DatabaseHelper();
+    int? userId = widget.userId ?? dbHelper.getCurrentUserId();
+    if (userId == null) return;
+
+    final today = DateTime.now().toIso8601String().split('T').first;
+
+    try {
+      final db = await dbHelper.database;
+      final existing = await db.query(
+        'sesi_kepatuhan',
+        where: 'user_id = ? AND tanggal = ? AND sesi_index = ?',
+        whereArgs: [userId, today, _obatAktifIndex],
+      );
+      if (existing.isNotEmpty) {
+        await db.update(
+          'sesi_kepatuhan',
+          {'status': 0},
+          where: 'id = ?',
+          whereArgs: [existing.first['id']],
+        );
+      }
+      await dbHelper.updateKepatuhan(userId, today, 0);
+      _konfirmasiToken++;
+      setState(() {
+        _obatSudahDiminum = false;
+        _showTerimaKasih = false;
+      });
+    } catch (e) {
+      debugPrint('Error membatalkan kepatuhan: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Gagal membatalkan status'),
           backgroundColor: Colors.red,
         ),
       );
@@ -195,7 +270,6 @@ class _HomeScreenState extends State<HomeScreen> {
                         efekKemarin: _efekKemarin,
                         efekHariIni: _efekHariIni,
                         onTapPeringatan: () {
-                          // Navigasi ke halaman efek samping
                         },
                       ),
                       const SizedBox(height: 16),
@@ -220,7 +294,6 @@ class _HomeScreenState extends State<HomeScreen> {
                               beratBadan: _beratBadan,
                               selisih: _selisihBerat,
                               onUpdate: () {
-                                // Navigasi ke halaman input berat badan
                               },
                             ),
                           ),
@@ -230,7 +303,6 @@ class _HomeScreenState extends State<HomeScreen> {
                               sudahIsi: _sudahIsiSkrining,
                               gejala: _gejala,
                               onIsi: () {
-                                // Navigasi ke halaman skrining
                               },
                             ),
                           ),
@@ -247,15 +319,23 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       bottomNavigationBar: AppBottomNav(
         currentIndex: _currentIndex,
-        onTap: (i) => setState(() => _currentIndex = i),
+        onTap: (i) {
+          if (i == 1) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const CalendarPage()),
+            ).then((_) {
+              setState(() => _currentIndex = 0);
+            });
+          } else {
+            setState(() => _currentIndex = i);
+          }
+        },
       ),
     );
   }
 }
 
-// ─────────────────────────────────────────────
-//  Top Bar (sama seperti sebelumnya)
-// ─────────────────────────────────────────────
 class _TopBar extends StatelessWidget {
   final String name;
   final String? photoUrl;
@@ -299,7 +379,6 @@ class _TopBar extends StatelessWidget {
           const Spacer(),
           GestureDetector(
             onTap: () {
-              // Navigasi ke profile
               Navigator.push(
                 context,
                 MaterialPageRoute(
@@ -357,8 +436,15 @@ class _GreetingSection extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
       decoration: BoxDecoration(
-        color: const Color(0xFFEDE7F6),
+        color: const Color(0xFFE4E0EC),
         borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.08),
+            blurRadius: 14,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       child: Stack(
         children: [
@@ -443,7 +529,7 @@ class _RibbonPainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter old) => false;
 }
 
-// ── PeringatanGabunganCard (sama) ──
+// ── PeringatanGabunganCard ──
 class _PeringatanGabunganCard extends StatelessWidget {
   final String efekKemarin;
   final String efekHariIni;
@@ -607,7 +693,7 @@ class _PeringatanGabunganCard extends StatelessWidget {
   }
 }
 
-// ── ObatCard (sama) ──
+// ── ObatCard  ──
 class _ObatCard extends StatelessWidget {
   final String namaObat;
   final String jam;
@@ -700,7 +786,9 @@ class _ObatCard extends StatelessWidget {
                     height: 88,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: Colors.white,
+                      color: sudahDiminum
+                          ? AppColors.success.withOpacity(0.08)
+                          : Colors.white,
                       border: Border.all(
                         color: sudahDiminum ? AppColors.success : AppColors.primary,
                         width: 2.5,
@@ -724,7 +812,7 @@ class _ObatCard extends StatelessWidget {
                 const SizedBox(height: 14),
                 Text(
                   sudahDiminum
-                      ? 'Terima Kasih telah rutin \nmeminum obat hari ini!'
+                      ? 'Terima Kasih telah rutin meminum obat!\nTekan lagi untuk membatalkan'
                       : 'Tekan tombol di atas untuk\nkonfirmasi minum obat',
                   textAlign: TextAlign.center,
                   style: TextStyle(
@@ -764,7 +852,7 @@ class _ObatCard extends StatelessWidget {
   }
 }
 
-// ── BeratBadanCard (dengan onUpdate callback) ──
+// ── BeratBadanCard  ──
 class _BeratBadanCard extends StatelessWidget {
   final double beratBadan;
   final double selisih;
@@ -861,7 +949,7 @@ class _BeratBadanCard extends StatelessWidget {
   }
 }
 
-// ── SkriningCard (sama) ──
+// ── SkriningCard ──
 class _SkriningCard extends StatelessWidget {
   final bool sudahIsi;
   final List<String> gejala;

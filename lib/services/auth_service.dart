@@ -9,7 +9,7 @@ class AuthService {
   factory AuthService() => _instance;
   AuthService._internal();
 
-  final GoogleSignIn _googleSignIn = GoogleSignIn.instance;
+  final GoogleSignIn _googleSignIn = GoogleSignIn();
 
   Future<void> init() async {
     // Method ini bisa kosong
@@ -94,11 +94,22 @@ class AuthService {
   // LOGIN dengan Google
   Future<Map<String, dynamic>> signInWithGoogle() async {
     try {
-      final GoogleSignInAccount googleUser = await _googleSignIn.authenticate();
+      await _googleSignIn.signOut();
 
-      final email = googleUser.email.toLowerCase().trim();
-      final name = googleUser.displayName ?? '';
-      final photoUrl = googleUser.photoUrl;
+      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
+
+      if (googleUser == null) {
+        return {
+          'success': false,
+          'message': 'Login dibatalkan',
+        };
+      }
+
+    final email = googleUser.email.toLowerCase().trim();
+    final name = googleUser.displayName ?? '';
+    final photoUrl = googleUser.photoUrl;
+
+    // ... sisa kode tetap sama
 
       var user = await DatabaseHelper().getUserByEmail(email);
       bool isNewUser = false;
