@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:tbc_app/services/auth_service.dart';
 import 'package:tbc_app/pages/authentication/authentication.dart';
+import 'package:tbc_app/pages/detail_efek_samping.dart';
 import 'theme.dart';
 
 void main() async {
@@ -30,7 +31,8 @@ class MyApp extends StatelessWidget {
       title: 'TBC Care',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.theme,
-      home: const AuthScreen(),
+      // home: const AuthScreen(),
+      home: const DetailEfekSampingPage(),
     );
   }
 }

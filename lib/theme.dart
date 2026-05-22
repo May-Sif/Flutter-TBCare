@@ -22,7 +22,43 @@ class AppColors {
   static const Color cardPengingat = Color(0xFFE4E0EC); // Ungu muda dari desain
   static const Color borderPengingat = Color(0xFFC4B5FD);
   static const Color unguPrimary = Color(0xFF8B5CF6);
-
+  
+  // ========== TAMBAHAN UNTUK DetailEfekSampingPage ==========
+  
+  // Warna untuk card gejala (warna sekunder light)
+  static const Color secondaryLight = Color(0xFFDDF1F4);
+  
+  // Warna warning/perhatian
+  static const Color warningLight = Color(0xFFFFF3CD);
+  static const Color warningDark = Color(0xFFE65100);
+  static const Color warningBorder = Color(0xFFFFE082);
+  
+  // Warna timeline dan indikator
+  static const Color timelineDot = Color(0xFF4D7680);
+  static const Color timelineLine = Color(0xFFBFE4EA);
+  static const Color timelineDotInactive = Color(0xFFD9E0EC);
+  
+  // Warna untuk card riwayat
+  static const Color historyCardBg = Color(0xFFF3F3F3);
+  static const Color historyDateBg = Color(0xFFD7EEF3);
+  
+  // Warna untuk card peringatan
+  static const Color peringatanHeaderBg = Color(0xFFFFF3CD);
+  static const Color peringatanHeaderText = Color(0xFFE65100);
+  static const Color peringatanBadgeBg = Color(0xFFFF8F00);
+  static const Color peringatanButtonBg = Color(0xFFD32F2F);
+  static const Color peringatanDivider = Color(0xFFE0E0E0);
+  
+  // Warna untuk card obat
+  static const Color obatCardBg = Color(0xFFDCEEFB);
+  static const Color obatInfoBg = Color(0xFFFFFDE7);
+  
+  // Warna untuk greeting card
+  static const Color greetingBg = Color(0xFFEDE7F6);
+  
+  // Warna untuk skrining card
+  static const Color skriningHighRiskBg = Color(0xFFD32F2F);
+  static const Color skriningDotColor = Color(0xFFEF9A9A);
 }
 
 class AppTheme {
