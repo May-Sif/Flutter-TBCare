@@ -162,6 +162,23 @@ class _IsiDataObatPageState extends State<IsiDataObatPage> {
     }
   }
 
+  // Ketika user mengedit obat, catat perubahannya
+  Future<void> _saveRiwayatPerubahan(String obatLama, String obatBaru, String alasan) async {
+    final dbHelper = DatabaseHelper();
+    int? userId = widget.userId ?? dbHelper.getCurrentUserId();
+    
+    if (userId != null) {
+      final tanggal = DateTime.now().toIso8601String().split('T').first;
+      await dbHelper.insertRiwayatPerubahanObat(
+        userId: userId,
+        tanggal: tanggal,
+        obatLama: obatLama,
+        obatBaru: obatBaru,
+        alasan: alasan,
+      );
+    }
+  }
+
   void _addMedication(int sessionIndex) {
     setState(() {
       Medication newMed = Medication(
@@ -263,7 +280,7 @@ class _IsiDataObatPageState extends State<IsiDataObatPage> {
       if (!mounted) return;
       Navigator.pop(context); // Tutup loading
       
-      // 🔥 PERBAIKAN 2: Akses nama dengan aman (null safety)
+      // Akses nama dengan aman (null safety)
       String namaPasien = '';
       if (widget.dataDiri != null && widget.dataDiri!['nama'] != null) {
         namaPasien = widget.dataDiri!['nama']!;
@@ -538,20 +555,33 @@ class _IsiDataObatPageState extends State<IsiDataObatPage> {
                   TextFormField(
                     initialValue: med.keterangan,
                     decoration: const InputDecoration(
-                      hintText: 'Keterangan (Optional)',
+                      hintText: 'Keterangan (Optional) - isi jika ada efek samping atau perubahan',
                       border: InputBorder.none,
                       filled: true,
                       fillColor: Colors.white,
-                      contentPadding: EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 10,
-                      ),
+                      contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                     ),
                     style: const TextStyle(fontSize: 16),
-                    onChanged: (value) {
+                    onChanged: (value) async {
                       setState(() {
-                        _pagiMedications.medications[medIndex].keterangan = value;
+                        _malamMedications.medications[medIndex].keterangan = value;
                       });
+                      
+                      // Jika keterangan diisi (bukan hanya edit biasa)
+                      if (widget.existingJadwalObat != null && value.isNotEmpty) {
+                        // Bandingkan dengan nilai lama
+                        final oldValue = widget.existingJadwalObat!
+                            .where((o) => o['sesi'] == 'Malam' && o['namaObat'] == med.name)
+                            .firstOrNull?['keterangan'] ?? '';
+                        
+                        if (oldValue != value) {
+                          await _saveRiwayatPerubahan(
+                            med.name,
+                            med.name,
+                            'Efek samping: $value'
+                          );
+                        }
+                      }
                     },
                   ),
                 ],

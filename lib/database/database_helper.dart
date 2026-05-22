@@ -74,6 +74,44 @@ class DatabaseHelper {
         FOREIGN KEY (user_id) REFERENCES user (id) ON DELETE CASCADE
       )
     ''');
+
+    // Tabel efek_samping
+    await db.execute('''
+      CREATE TABLE efek_samping (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        tanggal TEXT NOT NULL,
+        efek TEXT NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES user (id) ON DELETE CASCADE,
+        UNIQUE(user_id, tanggal, efek)
+      )
+    ''');
+
+    // tabel sesi_kepatuhan
+    await db.execute('''
+      CREATE TABLE sesi_kepatuhan (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        tanggal TEXT NOT NULL,
+        sesi_index INTEGER NOT NULL,
+        status INTEGER DEFAULT 0,
+        FOREIGN KEY (user_id) REFERENCES user (id) ON DELETE CASCADE,
+        UNIQUE(user_id, tanggal, sesi_index)
+      )
+    ''');
+
+    // // Tabel riwayat perubahan obat
+    await db.execute('''
+      CREATE TABLE riwayat_perubahan_obat (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        tanggal TEXT NOT NULL,
+        obat_lama TEXT NOT NULL,
+        obat_baru TEXT NOT NULL,
+        alasan TEXT,
+        FOREIGN KEY (user_id) REFERENCES user (id) ON DELETE CASCADE
+      )
+    ''');
   }
 
   // ========== USER ==========
@@ -352,8 +390,6 @@ class DatabaseHelper {
     return result.isNotEmpty ? result.first['status'] as int? ?? 0 : 0;
   }
 
-  // Tambahkan di DatabaseHelper
-
   Future<Map<String, dynamic>?> getUserById(int id) async {
     Database db = await database;
     List<Map<String, dynamic>> result = await db.query(
@@ -362,5 +398,152 @@ class DatabaseHelper {
       whereArgs: [id],
     );
     return result.isNotEmpty ? result.first : null;
+  }
+
+  // ========== EFEK SAMPING ==========
+
+  // Simpan efek samping hari ini
+  Future<void> saveEfekSamping(int userId, String tanggal, List<String> efekList) async {
+    Database db = await database;
+    
+    // Hapus efek samping lama untuk tanggal ini
+    await db.delete(
+      'efek_samping',
+      where: 'user_id = ? AND tanggal = ?',
+      whereArgs: [userId, tanggal],
+    );
+    
+    // Insert efek samping baru
+    for (var efek in efekList) {
+      await db.insert('efek_samping', {
+        'user_id': userId,
+        'tanggal': tanggal,
+        'efek': efek.toLowerCase(),
+      });
+    }
+  }
+
+  // Ambil efek samping berdasarkan tanggal
+  Future<List<String>> getEfekSampingByDate(int userId, String tanggal) async {
+    Database db = await database;
+    final result = await db.query(
+      'efek_samping',
+      where: 'user_id = ? AND tanggal = ?',
+      whereArgs: [userId, tanggal],
+    );
+    return result.map((e) => e['efek'] as String).toList();
+  }
+
+  // Ambil semua efek samping dalam bulan tertentu
+  Future<Map<String, List<String>>> getEfekSampingByMonth(int userId, int tahun, int bulan) async {
+    Database db = await database;
+    final bulanStr = '$tahun-${bulan.toString().padLeft(2, '0')}';
+    final result = await db.query(
+      'efek_samping',
+      where: 'user_id = ? AND tanggal LIKE ?',
+      whereArgs: [userId, '$bulanStr%'],
+      orderBy: 'tanggal DESC',
+    );
+    
+    final Map<String, List<String>> map = {};
+    for (var row in result) {
+      final tanggal = row['tanggal'] as String;
+      final efek = row['efek'] as String;
+      if (!map.containsKey(tanggal)) {
+        map[tanggal] = [];
+      }
+      map[tanggal]!.add(efek);
+    }
+    return map;
+  }
+
+  // ========== SESI KEPATUHAN ==========
+
+  // Update status kepatuhan per sesi
+  Future<void> updateSesiKepatuhan(int userId, String tanggal, int sesiIndex, int status) async {
+    Database db = await database;
+    
+    final existing = await db.query(
+      'sesi_kepatuhan',
+      where: 'user_id = ? AND tanggal = ? AND sesi_index = ?',
+      whereArgs: [userId, tanggal, sesiIndex],
+    );
+    
+    if (existing.isNotEmpty) {
+      await db.update(
+        'sesi_kepatuhan',
+        {'status': status},
+        where: 'id = ?',
+        whereArgs: [existing.first['id']],
+      );
+    } else {
+      await db.insert('sesi_kepatuhan', {
+        'user_id': userId,
+        'tanggal': tanggal,
+        'sesi_index': sesiIndex,
+        'status': status,
+      });
+    }
+  }
+
+  // Ambil status semua sesi untuk tanggal tertentu
+  Future<Map<int, int>> getSesiKepatuhanByDate(int userId, String tanggal) async {
+    Database db = await database;
+    final result = await db.query(
+      'sesi_kepatuhan',
+      where: 'user_id = ? AND tanggal = ?',
+      whereArgs: [userId, tanggal],
+    );
+    
+    final Map<int, int> map = {};
+    for (var row in result) {
+      map[row['sesi_index'] as int] = row['status'] as int;
+    }
+    return map;
+  }
+
+  // Menyimpan riwayat perubahan obat
+  Future<int> insertRiwayatPerubahanObat({
+    required int userId,
+    required String tanggal,
+    required String obatLama,
+    required String obatBaru,
+    String? alasan,
+  }) async {
+    Database db = await database;
+    return await db.insert('riwayat_perubahan_obat', {
+      'user_id': userId,
+      'tanggal': tanggal,
+      'obat_lama': obatLama,
+      'obat_baru': obatBaru,
+      'alasan': alasan,
+    });
+  }
+
+  // Mengambil semua riwayat perubahan obat untuk user
+  Future<List<Map<String, dynamic>>> getRiwayatPerubahanObat(int userId) async {
+    Database db = await database;
+    return await db.query(
+      'riwayat_perubahan_obat',
+      where: 'user_id = ?',
+      whereArgs: [userId],
+      orderBy: 'tanggal DESC',
+    );
+  }
+
+  // Mengambil riwayat perubahan obat berdasarkan bulan
+  Future<List<Map<String, dynamic>>> getRiwayatPerubahanObatByMonth(
+    int userId, 
+    int tahun, 
+    int bulan
+  ) async {
+    Database db = await database;
+    final bulanStr = '$tahun-${bulan.toString().padLeft(2, '0')}';
+    return await db.query(
+      'riwayat_perubahan_obat',
+      where: 'user_id = ? AND tanggal LIKE ?',
+      whereArgs: [userId, '$bulanStr%'],
+      orderBy: 'tanggal DESC',
+    );
   }
 }

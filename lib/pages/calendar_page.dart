@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../database/database_helper.dart';
+import '../pages/detail_efek_samping.dart';
 import '../providers/home_provider.dart';
 import '../theme.dart';
 import '../widgets/app_bottom_nav.dart';
@@ -586,8 +587,16 @@ class _CalendarPageState extends State<CalendarPage> with RouteAware {
     );
   }
 
-  void _simpanLaporan() {
+  void _simpanLaporan() async{
     final gejalaList = _efekDipilih.toList();
+    final dbHelper = DatabaseHelper();
+    int? userId = _db.getCurrentUserId();
+    
+    if (userId != null) {
+      final tanggal = DateTime.now().toIso8601String().split('T').first;
+      await dbHelper.saveEfekSamping(userId, tanggal, gejalaList);
+    }
+
     showDialog(
       context: context,
       builder: (_) => Dialog(
@@ -667,12 +676,26 @@ class _CalendarPageState extends State<CalendarPage> with RouteAware {
     );
   }
 
-  void _periksaDetail() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Membuka halaman detail...'),
-        backgroundColor: AppColors.primary),
-    );
+  void _periksaDetail() async {
+    // Ambil userId dari DatabaseHelper
+    final dbHelper = DatabaseHelper();
+    int? userId = dbHelper.getCurrentUserId();
+    
+    // Navigasi ke halaman detail efek samping
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => DetailEfekSampingPage(
+          userId: userId,
+          tahun: _focusedMonth.year,
+          bulan: _focusedMonth.month,
+        ),
+      ),
+    ).then((_) {
+      // Ketika kembali dari halaman detail, reload data
+      _loadSesiStatus();
+      _loadKepatuhanBulan();
+    });
   }
 
   void _showTambahEfekDialog() {
