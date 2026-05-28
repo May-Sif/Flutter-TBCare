@@ -10,7 +10,6 @@ import '../pages/riwayat_kesehatan_page.dart';
 import '../pages/profile_page.dart';
 import '../pages/home_page.dart';
 
-// Dideklarasikan global, daftarkan juga di MaterialApp(navigatorObservers) di main.dart
 final RouteObserver<ModalRoute<void>> routeObserver = RouteObserver<ModalRoute<void>>();
 
 class CalendarPage extends StatefulWidget {
@@ -59,7 +58,6 @@ class _CalendarPageState extends State<CalendarPage> with RouteAware {
     super.dispose();
   }
 
-  // Dipanggil setiap kali halaman ini muncul kembali (misal balik dari home)
   @override
   void didPopNext() {
     _loadSesiStatus();
@@ -323,9 +321,7 @@ class _CalendarPageState extends State<CalendarPage> with RouteAware {
     final tanggalStr =
         '${_focusedMonth.year}-${_focusedMonth.month.toString().padLeft(2, '0')}-${day.toString().padLeft(2, '0')}';
     final status = _kepatuhanBulan[tanggalStr];
-    // Teratur  = record ada & status == 1
     final isTeratur = status == 1;
-    // Terlewat = hanya hari ini kalau belum minum, tanggal lain dibiarkan default
     final tanggalIni = DateTime(_focusedMonth.year, _focusedMonth.month, day);
     final today = DateTime.now();
     final todayOnly = DateTime(today.year, today.month, today.day);

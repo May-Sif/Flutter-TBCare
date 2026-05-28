@@ -1,4 +1,4 @@
-// lib/pages/profile_page.dart
+ // lib/pages/profile_page.dart
 
 import 'package:flutter/material.dart';
 import 'package:tbc_app/pages/authentication/authentication.dart';
