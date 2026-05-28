@@ -20,7 +20,6 @@ class DetailEfekSampingPage extends StatefulWidget {
 }
 
 class _DetailEfekSampingPageState extends State<DetailEfekSampingPage> {
-  int _currentIndex = 2;
   int _selectedYear = DateTime.now().year;
   int _selectedMonth = DateTime.now().month;
   DateTime _selectedDate = DateTime.now();
@@ -29,6 +28,12 @@ class _DetailEfekSampingPageState extends State<DetailEfekSampingPage> {
   bool _isLoading = true;
   List<Map<String, dynamic>> _riwayatPerubahan = [];
   bool _isLoadingHistory = true;
+  
+  // ScrollController untuk mengontrol scroll horizontal
+  final ScrollController _scrollController = ScrollController();
+  
+  // Flag untuk menandai apakah sudah pernah scroll ke today
+  bool _hasScrolledToToday = false;
   
   final List<String> _namaBulan = [
     'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
@@ -44,6 +49,36 @@ class _DetailEfekSampingPageState extends State<DetailEfekSampingPage> {
     _loadRiwayatPerubahan();
   }
 
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  // Fungsi untuk scroll ke tanggal tertentu
+  void _scrollToDate(DateTime targetDate, List<DateTime> days) {
+    if (!mounted) return;
+    
+    // Cari index tanggal target
+    final targetIndex = days.indexWhere((date) => 
+      date.year == targetDate.year && 
+      date.month == targetDate.month && 
+      date.day == targetDate.day
+    );
+    
+    // Jika ditemukan, scroll ke posisi tersebut
+    if (targetIndex != -1 && _scrollController.hasClients) {
+      // Hitung offset scroll (lebar item 65 + padding 4 = 69)
+      // plus padding horizontal 20
+      final offset = (targetIndex * 69.0) - 20;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_scrollController.hasClients) {
+          _scrollController.jumpTo(offset > 0 ? offset : 0);
+        }
+      });
+    }
+  }
+
   Future<void> _loadEfekSamping() async {
     setState(() => _isLoading = true);
     
@@ -55,6 +90,7 @@ class _DetailEfekSampingPageState extends State<DetailEfekSampingPage> {
     }
     
     setState(() => _isLoading = false);
+    _hasScrolledToToday = false; // Reset flag saat loading ulang
   }
 
   Future<void> _loadRiwayatPerubahan() async {
@@ -84,8 +120,21 @@ class _DetailEfekSampingPageState extends State<DetailEfekSampingPage> {
         _selectedYear++;
       }
     });
+    _hasScrolledToToday = false; // Reset flag saat ganti bulan
     await _loadEfekSamping();
     await _loadRiwayatPerubahan();
+    
+    // Setelah ganti bulan, pilih tanggal yang sesuai
+    final now = DateTime.now();
+    if (_selectedYear == now.year && _selectedMonth == now.month) {
+      setState(() {
+        _selectedDate = now;
+      });
+    } else {
+      setState(() {
+        _selectedDate = DateTime(_selectedYear, _selectedMonth, 1);
+      });
+    }
   }
 
   List<DateTime> _getDaysInMonth() {
@@ -114,8 +163,19 @@ class _DetailEfekSampingPageState extends State<DetailEfekSampingPage> {
 
     final days = _getDaysInMonth();
     final today = DateTime.now();
-    final isToday = (date) => date.year == today.year && date.month == today.month && date.day == today.day;
     final hasEfek = (date) => _getGejalaForDate(date).isNotEmpty;
+    
+    // Cek apakah bulan yang ditampilkan adalah bulan berjalan
+    final isCurrentMonth = _selectedYear == today.year && _selectedMonth == today.month;
+
+    // Scroll ke tanggal hari ini jika:
+    // 1. Belum pernah scroll ke today
+    // 2. Controller sudah tersedia
+    // 3. Ini adalah bulan berjalan
+    if (!_hasScrolledToToday && _scrollController.hasClients && isCurrentMonth) {
+      _hasScrolledToToday = true;
+      _scrollToDate(today, days);
+    }
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -181,6 +241,7 @@ class _DetailEfekSampingPageState extends State<DetailEfekSampingPage> {
             SizedBox(
               height: 100,
               child: ListView.builder(
+                controller: _scrollController,
                 scrollDirection: Axis.horizontal,
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 itemCount: days.length,
@@ -309,10 +370,6 @@ class _DetailEfekSampingPageState extends State<DetailEfekSampingPage> {
             const SizedBox(height: 16),
           ],
         ),
-      ),
-      bottomNavigationBar: AppBottomNav(
-        currentIndex: _currentIndex,
-        onTap: (i) => setState(() => _currentIndex = i),
       ),
     );
   }

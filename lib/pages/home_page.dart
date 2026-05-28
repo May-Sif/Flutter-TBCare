@@ -4,6 +4,7 @@ import 'package:tbc_app/widgets/app_bottom_nav.dart';
 import 'package:tbc_app/database/database_helper.dart';
 import 'package:tbc_app/pages/profile_page.dart';
 import 'package:tbc_app/pages/calendar_page.dart';
+import 'package:tbc_app/pages/riwayat_kesehatan_page.dart';
 
 class HomeScreen extends StatefulWidget {
   final String email;
@@ -232,6 +233,60 @@ class _HomeScreenState extends State<HomeScreen> {
     return n.split(' ').first.split('@').first;
   }
 
+  void _onNavBarTap(int index) {
+    if (index == _currentIndex) return; // Sudah di halaman yang sama
+    
+    // Halaman index 0: Beranda (HomeScreen)
+    if (index == 0) {
+      setState(() => _currentIndex = index);
+      return;
+    }
+    
+    // Halaman index 1: Jadwal → CalendarPage
+    if (index == 1) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const CalendarPage()),
+      ).then((_) {
+        // Ketika kembali ke HomeScreen, reset index ke 0 (Beranda)
+        if (mounted) {
+          setState(() => _currentIndex = 0);
+        }
+      });
+      return;
+    }
+    
+    // Halaman index 2: Statistik → RiwayatKesehatanPage
+    if (index == 2) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => RiwayatKesehatanPage(userId: widget.userId),
+        ),
+      ).then((_) {
+        if (mounted) {
+          setState(() => _currentIndex = 0);
+        }
+      });
+      return;
+    }
+    
+    // Halaman index 3: Profil → ProfilPage
+    if (index == 3) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ProfilPage(userId: widget.userId),
+        ),
+      ).then((_) {
+        if (mounted) {
+          setState(() => _currentIndex = 0);
+        }
+      });
+      return;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -319,18 +374,7 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       bottomNavigationBar: AppBottomNav(
         currentIndex: _currentIndex,
-        onTap: (i) {
-          if (i == 1) {
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const CalendarPage()),
-            ).then((_) {
-              setState(() => _currentIndex = 0);
-            });
-          } else {
-            setState(() => _currentIndex = i);
-          }
-        },
+        onTap: _onNavBarTap,
       ),
     );
   }
