@@ -4,6 +4,8 @@ import 'package:tbc_app/widgets/app_bottom_nav.dart';
 import 'package:tbc_app/database/database_helper.dart';
 import 'package:tbc_app/pages/profile_page.dart';
 import 'package:tbc_app/pages/calendar_page.dart';
+import 'package:tbc_app/pages/form_screening.dart';
+import 'package:tbc_app/pages/hasil_screening.dart';
 
 class HomeScreen extends StatefulWidget {
   final String email;
@@ -36,8 +38,10 @@ class _HomeScreenState extends State<HomeScreen> {
   String _efekKemarin = '';
   String _efekHariIni = '';
   bool _sudahIsiSkrining = false;
-  List<String> _gejala = [];
-  
+  List<String> _gejalaTinggi = [];
+  List<String> _gejalaSedang = [];
+  Map<String, dynamic> _hasilSkrining = {};
+
   bool _showTerimaKasih = false;
   int _obatAktifIndex = 0;
 
@@ -64,16 +68,10 @@ class _HomeScreenState extends State<HomeScreen> {
         return;
       }
       
-      // Ambil data lengkap user dari database
       final userData = await dbHelper.getCompleteUserData(userId);
-      
-      // Ambil data diri
       final dataDiri = userData['dataDiri'] as Map<String, String>? ?? {};
-      
-      // Ambil jadwal obat
+
       _jadwalObat = List<Map<String, dynamic>>.from(userData['jadwalObat'] ?? []);
-      
-      // Update user info
       _userName = dataDiri['nama'] ?? widget.name;
       _userEmail = widget.email;
       
@@ -284,7 +282,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     const SizedBox(height: 16),
 
-                    // ── Baris bawah ──
+                    // ── Card bawah ──
                     IntrinsicHeight(
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -301,8 +299,25 @@ class _HomeScreenState extends State<HomeScreen> {
                           Expanded(
                             child: _SkriningCard(
                               sudahIsi: _sudahIsiSkrining,
-                              gejala: _gejala,
-                              onIsi: () {
+                              gejalaTinggi: _gejalaTinggi,
+                              gejalaSedang: _gejalaSedang,
+                              onIsi: () async {
+                                final result = await Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => FormScreeningPage(
+                                      userId: widget.userId,
+                                    ),
+                                  ),
+                                );
+
+                                if (result != null && result is Map) {
+                                  setState(() {
+                                    _sudahIsiSkrining = result['sudahIsi'] == true;
+                                    _gejalaTinggi = List<String>.from(result['gejalaTinggi'] ?? []);
+                                    _gejalaSedang = List<String>.from(result['gejalaSedang'] ?? []);
+                                  });
+                                }
                               },
                             ),
                           ),
@@ -424,7 +439,7 @@ class _TopBar extends StatelessWidget {
   }
 }
 
-// ── Greeting Section (sama seperti sebelumnya) ──
+// ── Greeting Section ──
 class _GreetingSection extends StatelessWidget {
   final String greeting;
   final String name;
@@ -952,19 +967,23 @@ class _BeratBadanCard extends StatelessWidget {
 // ── SkriningCard ──
 class _SkriningCard extends StatelessWidget {
   final bool sudahIsi;
-  final List<String> gejala;
+  final List<String> gejalaTinggi;
+  final List<String> gejalaSedang;
   final VoidCallback onIsi;
 
   const _SkriningCard({
     required this.sudahIsi,
-    required this.gejala,
+    required this.gejalaTinggi,
+    required this.gejalaSedang,
     required this.onIsi,
   });
 
   @override
   Widget build(BuildContext context) {
+    final adaTinggi = gejalaTinggi.isNotEmpty;
+    final adaSedang = gejalaSedang.isNotEmpty;
+
     return Container(
-      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
@@ -979,78 +998,150 @@ class _SkriningCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: const [
-              Icon(Icons.favorite_border_rounded, size: 16, color: Color(0xFFE57373)),
-              SizedBox(width: 4),
-              Flexible(
-                child: Text(
-                  'Screening Mingguan',
-                  style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+            child: Row(
+              children: const [
+                Icon(Icons.favorite_border_rounded, size: 16, color: Color(0xFFE57373)),
+                SizedBox(width: 4),
+                Flexible(
+                  child: Text(
+                    'Screening Mingguan',
+                    style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
           const SizedBox(height: 12),
-          if (sudahIsi) ...[
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(
-                color: const Color(0xFFD32F2F),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: const Text(
-                'HIGH RISK',
-                style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.white),
-              ),
-            ),
-            const SizedBox(height: 10),
-            ...gejala.map(
-              (g) => Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 8,
-                      height: 8,
-                      decoration: const BoxDecoration(shape: BoxShape.circle, color: Color(0xFFEF9A9A)),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(g, style: const TextStyle(fontSize: 13, color: AppColors.textPrimary)),
-                  ],
+
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: _buildKonten(adaTinggi, adaSedang),
+          ),
+          const Spacer(),
+
+          if (!sudahIsi)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+              child: SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: onIsi,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    elevation: 0,
+                  ),
+                  child: const Text(
+                    'Isi Sekarang',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                  ),
                 ),
               ),
-            ),
-          ] else ...[
-            const Text(
-              'ANDA BELUM\nMENGISI SKRINING\nMINGGU INI',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-                color: AppColors.textSecondary,
-                height: 1.6,
-              ),
-            ),
+            )
+          else
             const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: onIsi,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                  elevation: 0,
-                ),
-                child: const Text(
-                  'Isi Sekarang',
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-                ),
-              ),
-            ),
-          ],
         ],
+      ),
+    );
+  }
+
+  Widget _buildKonten(bool adaTinggi, bool adaSedang) {
+    if (!sudahIsi) {
+      return const Text(
+        'ANDA BELUM MENGISI SKRINING MINGGU INI',
+        style: TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w700,
+          color: Color(0xFFF97316),
+          height: 1.6,
+        ),
+      );
+    } else if (adaTinggi) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: const Color(0xFFD32F2F),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: const Text(
+              'HIGH RISK',
+              style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.white),
+            ),
+          ),
+          const SizedBox(height: 10),
+          _buildGejalaList(gejalaTinggi, const Color(0xFFDC2626)),
+        ],
+      );
+    } else if (adaSedang) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF97316),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: const Text(
+              'MEDIUM RISK',
+              style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.white),
+            ),
+          ),
+          const SizedBox(height: 10),
+          _buildGejalaList(gejalaSedang, const Color(0xFFF97316)),
+        ],
+      );
+    } else {
+      return const Text(
+        'Kondisi kesehatan anda mengalami peningkatan!',
+        style: TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w700,
+          color: Color(0xFF0D9488),
+          height: 1.4,
+        ),
+      );
+    }
+  }
+
+  Widget _buildGejalaList(List<String> items, Color dotColor) {
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxHeight: 120),
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: items.map((g) => Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 5),
+                  child: Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(shape: BoxShape.circle, color: dotColor),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    g,
+                    style: const TextStyle(fontSize: 12, color: AppColors.textPrimary),
+                    softWrap: true,
+                  ),
+                ),
+              ],
+            ),
+          )).toList(),
+        ),
       ),
     );
   }
