@@ -6,6 +6,9 @@ import '../pages/detail_efek_samping.dart';
 import '../providers/home_provider.dart';
 import '../theme.dart';
 import '../widgets/app_bottom_nav.dart';
+import '../pages/riwayat_kesehatan_page.dart';
+import '../pages/profile_page.dart';
+import '../pages/home_page.dart';
 
 final RouteObserver<ModalRoute<void>> routeObserver = RouteObserver<ModalRoute<void>>();
 
@@ -99,6 +102,50 @@ class _CalendarPageState extends State<CalendarPage> with RouteAware {
     setState(() => _kepatuhanBulan = map);
   }
 
+  void _onNavBarTap(int index) {
+    if (index == _navIndex) return;
+    
+    // Index 0: Beranda → HomeScreen
+    if (index == 0) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => HomeScreen(
+            email: '',
+            name: '',
+            userId: _userId,
+          ),
+        ),
+      );
+      return;
+    }
+    
+    // Index 2: Statistik → RiwayatKesehatanPage
+    if (index == 2) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => RiwayatKesehatanPage(userId: _userId),
+        ),
+      );
+      return;
+    }
+    
+    // Index 3: Profil → ProfilPage
+    if (index == 3) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ProfilPage(userId: _userId),
+        ),
+      );
+      return;
+    }
+    
+    // Index 1: Tetap di halaman ini
+    setState(() => _navIndex = index);
+  }
+  
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -143,13 +190,7 @@ class _CalendarPageState extends State<CalendarPage> with RouteAware {
       ),
       bottomNavigationBar: AppBottomNav(
         currentIndex: _navIndex,
-        onTap: (i) {
-          if (i == 0) {
-            Navigator.of(context).pop();
-          } else {
-            setState(() => _navIndex = i);
-          }
-        },
+        onTap: _onNavBarTap,
       ),
     );
   }
