@@ -1,4 +1,3 @@
-// home_page.dart - Complete Fixed Version
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:tbc_app/theme.dart';
@@ -32,17 +31,14 @@ class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 0;
   bool _isLoading = true;
   
-  // Data efek samping
   bool _adaEfekSamping = false;
   String _latestEfekSamping = '';
   String _latestEfekSampingDate = '';
   int _latestEfekSampingSkor = 0;
   
-  // Data user
   String _userName = '';
   String _userEmail = '';
   
-  // Data obat untuk swipe
   List<Map<String, dynamic>> _jadwalObat = [];
   List<bool> _sesiStatus = [];
   List<bool> _isTransitioning = [];
@@ -50,12 +46,10 @@ class _HomeScreenState extends State<HomeScreen> {
   PageController _pageController = PageController();
   Timer? _autoSwipeTimer;
   
-  // Screening
   bool _sudahIsiSkrining = false;
   List<String> _gejalaTinggi = [];
   List<String> _gejalaSedang = [];
   
-  // Berat badan (sementara dummy)
   double _beratBadan = 0;
   double _selisihBerat = 0;
 
@@ -94,7 +88,6 @@ class _HomeScreenState extends State<HomeScreen> {
       final today = DateTime.now().toIso8601String().split('T').first;
       final db = await dbHelper.database;
       
-      // Load status minum untuk semua sesi
       _sesiStatus = List.filled(_jadwalObat.length, false);
       _isTransitioning = List.filled(_jadwalObat.length, false);
       
@@ -107,15 +100,12 @@ class _HomeScreenState extends State<HomeScreen> {
         _sesiStatus[i] = existing.isNotEmpty && (existing.first['status'] as int? ?? 0) == 1;
       }
       
-      // Tentukan sesi aktif berdasarkan WAKTU SAAT INI (prioritas utama)
       _currentSesiIndex = _getActiveSesiIndexByTime();
       
-      // Load efek samping terbaru
       await _loadLatestEfekSamping(userId);
       
       setState(() => _isLoading = false);
       
-      // Set PageView ke index yang sesuai setelah build selesai
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (_pageController.hasClients && _currentSesiIndex < _jadwalObat.length) {
           _pageController.jumpToPage(_currentSesiIndex);
@@ -174,11 +164,6 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  /// Cek apakah user DIPERBOLEHKAN mencentang obat untuk sesi tertentu
-  /// Aturan:
-  /// - Sesi PAGI: Bisa dicentang kapan saja (00:00 - 23:59) karena bisa di-backdate
-  /// - Sesi SIANG: Bisa dicentang mulai jam 11:00 ke atas
-  /// - Sesi MALAM: Bisa dicentang mulai jam 15:00 ke atas
   bool _canCheckMedication(String sessionName) {
     final now = DateTime.now();
     final currentMinutes = now.hour * 60 + now.minute;
@@ -198,23 +183,20 @@ class _HomeScreenState extends State<HomeScreen> {
   String _getCannotCheckMessage(String sessionName) {
     switch (sessionName.toLowerCase()) {
       case 'siang':
-        return '⚠️ Belum waktunya minum obat SIANG.\nWaktu minum obat siang dimulai jam 11:00';
+        return 'Belum waktunya minum obat SIANG.\nWaktu minum obat siang dimulai jam 11:00';
       case 'malam':
-        return '⚠️ Belum waktunya minum obat MALAM.\nWaktu minum obat malam dimulai jam 15:00';
+        return 'Belum waktunya minum obat MALAM.\nWaktu minum obat malam dimulai jam 15:00';
       default:
-        return '⚠️ Belum waktunya minum obat';
+        return 'Belum waktunya minum obat';
     }
   }
 
-  /// Menentukan sesi aktif berdasarkan WAKTU SAAT INI
-  /// Menampilkan card pertama dari sesi yang sesuai dengan jam sekarang
   int _getActiveSesiIndexByTime() {
     if (_jadwalObat.isEmpty) return 0;
     
     final now = DateTime.now();
     final currentMinutes = now.hour * 60 + now.minute;
     
-    // Tentukan sesi target berdasarkan jam sekarang
     String targetSession = '';
     
     // Pagi: 00:00 - 10:59
@@ -230,7 +212,6 @@ class _HomeScreenState extends State<HomeScreen> {
       targetSession = 'malam';
     }
     
-    // Cari index pertama dari sesi yang sesuai
     for (int i = 0; i < _jadwalObat.length; i++) {
       final sesi = _jadwalObat[i]['sesi']?.toLowerCase() ?? '';
       if (sesi == targetSession) {
@@ -238,7 +219,6 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     }
     
-    // Fallback: jika tidak ditemukan, return 0
     return 0;
   }
 
@@ -279,7 +259,6 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    // CEK APAKAH DIPERBOLEHKAN MENCENTANG
     String sesiName = _jadwalObat[index]['sesi'] ?? '';
     if (!_canCheckMedication(sesiName)) {
       String message = _getCannotCheckMessage(sesiName);
@@ -338,7 +317,6 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       );
       
-      // Auto-swipe ke obat berikutnya dalam sesi yang sama (jika ada)
       if (!_isAllMedicationsInSessionChecked(index)) {
         int? nextInSession = _getNextUncheckedInSession(index);
         
@@ -555,7 +533,6 @@ class _HomeScreenState extends State<HomeScreen> {
                       const SizedBox(height: 16),
                     ],
 
-                    // PageView untuk swipe antar sesi
                     if (_jadwalObat.isNotEmpty)
                       SizedBox(
                         height: 380,
@@ -590,7 +567,6 @@ class _HomeScreenState extends State<HomeScreen> {
                     else
                       const SizedBox(height: 380, child: Center(child: Text('Tidak ada jadwal obat'))),
                     
-                    // Indicator dot
                     if (_jadwalObat.length > 1)
                       Padding(
                         padding: const EdgeInsets.only(top: 8),
@@ -670,8 +646,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 }
-
-// ==================== WIDGETS ====================
 
 class _TopBar extends StatelessWidget {
   final String name;
