@@ -38,8 +38,7 @@ class MyApp extends StatelessWidget {
         title: 'TBC Care',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.theme,
-        //home: const AuthScreen(),
-        home: const FormScreeningPage()
+        home: const AuthScreen(),
       ),
     );
   }

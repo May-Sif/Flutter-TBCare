@@ -1,3 +1,5 @@
+// home_page.dart - Complete Fixed Version
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:tbc_app/theme.dart';
 import 'package:tbc_app/widgets/app_bottom_nav.dart';
@@ -43,8 +45,10 @@ class _HomeScreenState extends State<HomeScreen> {
   // Data obat untuk swipe
   List<Map<String, dynamic>> _jadwalObat = [];
   List<bool> _sesiStatus = [];
+  List<bool> _isTransitioning = [];
   int _currentSesiIndex = 0;
-  PageController _pageController = PageController(); // LANGSUNG DIINISIALISASI
+  PageController _pageController = PageController();
+  Timer? _autoSwipeTimer;
   
   // Screening
   bool _sudahIsiSkrining = false;
@@ -64,6 +68,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     _pageController.dispose();
+    _autoSwipeTimer?.cancel();
     super.dispose();
   }
 
@@ -91,6 +96,8 @@ class _HomeScreenState extends State<HomeScreen> {
       
       // Load status minum untuk semua sesi
       _sesiStatus = List.filled(_jadwalObat.length, false);
+      _isTransitioning = List.filled(_jadwalObat.length, false);
+      
       for (int i = 0; i < _jadwalObat.length; i++) {
         final existing = await db.query(
           'sesi_kepatuhan',
@@ -100,44 +107,20 @@ class _HomeScreenState extends State<HomeScreen> {
         _sesiStatus[i] = existing.isNotEmpty && (existing.first['status'] as int? ?? 0) == 1;
       }
       
-      // Tentukan sesi aktif pertama yang belum diminum
-      int activeIndex = 0;
-
-      // Cari sesi yang belum diminum sesuai toleransi waktu
-      int waktuBasedIndex = _getActiveSesiIndexByTime();
-
-      // Cek apakah sesi berdasarkan waktu sudah diminum atau belum
-      if (waktuBasedIndex < _sesiStatus.length && !_sesiStatus[waktuBasedIndex]) {
-        // Jika belum diminum, tampilkan sesi berdasarkan waktu
-        activeIndex = waktuBasedIndex;
-      } else {
-        // Jika sudah diminum, cari sesi berikutnya yang belum diminum
-        activeIndex = -1;
-        for (int i = 0; i < _jadwalObat.length; i++) {
-          if (!_sesiStatus[i]) {
-            activeIndex = i;
-            break;
-          }
-        }
-        // Jika semua sudah diminum, tampilkan yang terakhir
-        if (activeIndex == -1 && _jadwalObat.isNotEmpty) {
-          activeIndex = _jadwalObat.length - 1;
-        }
-      }
-      
-      _currentSesiIndex = activeIndex;
-      
-      // Set PageView ke index yang sesuai
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (_pageController.hasClients) {
-          _pageController.jumpToPage(_currentSesiIndex);
-        }
-      });
+      // Tentukan sesi aktif berdasarkan WAKTU SAAT INI (prioritas utama)
+      _currentSesiIndex = _getActiveSesiIndexByTime();
       
       // Load efek samping terbaru
       await _loadLatestEfekSamping(userId);
       
       setState(() => _isLoading = false);
+      
+      // Set PageView ke index yang sesuai setelah build selesai
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_pageController.hasClients && _currentSesiIndex < _jadwalObat.length) {
+          _pageController.jumpToPage(_currentSesiIndex);
+        }
+      });
       
     } catch (e) {
       print('Error loading home data: $e');
@@ -191,11 +174,126 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  /// Cek apakah user DIPERBOLEHKAN mencentang obat untuk sesi tertentu
+  /// Aturan:
+  /// - Sesi PAGI: Bisa dicentang kapan saja (00:00 - 23:59) karena bisa di-backdate
+  /// - Sesi SIANG: Bisa dicentang mulai jam 11:00 ke atas
+  /// - Sesi MALAM: Bisa dicentang mulai jam 15:00 ke atas
+  bool _canCheckMedication(String sessionName) {
+    final now = DateTime.now();
+    final currentMinutes = now.hour * 60 + now.minute;
+    
+    switch (sessionName.toLowerCase()) {
+      case 'pagi':
+        return true;
+      case 'siang':
+        return currentMinutes >= 11 * 60;
+      case 'malam':
+        return currentMinutes >= 15 * 60;
+      default:
+        return true;
+    }
+  }
+
+  String _getCannotCheckMessage(String sessionName) {
+    switch (sessionName.toLowerCase()) {
+      case 'siang':
+        return '⚠️ Belum waktunya minum obat SIANG.\nWaktu minum obat siang dimulai jam 11:00';
+      case 'malam':
+        return '⚠️ Belum waktunya minum obat MALAM.\nWaktu minum obat malam dimulai jam 15:00';
+      default:
+        return '⚠️ Belum waktunya minum obat';
+    }
+  }
+
+  /// Menentukan sesi aktif berdasarkan WAKTU SAAT INI
+  /// Menampilkan card pertama dari sesi yang sesuai dengan jam sekarang
+  int _getActiveSesiIndexByTime() {
+    if (_jadwalObat.isEmpty) return 0;
+    
+    final now = DateTime.now();
+    final currentMinutes = now.hour * 60 + now.minute;
+    
+    // Tentukan sesi target berdasarkan jam sekarang
+    String targetSession = '';
+    
+    // Pagi: 00:00 - 10:59
+    if (currentMinutes <= 10 * 60 + 59) {
+      targetSession = 'pagi';
+    }
+    // Siang: 11:00 - 14:59
+    else if (currentMinutes >= 11 * 60 && currentMinutes <= 14 * 60 + 59) {
+      targetSession = 'siang';
+    }
+    // Malam: 15:00 - 23:59
+    else if (currentMinutes >= 15 * 60) {
+      targetSession = 'malam';
+    }
+    
+    // Cari index pertama dari sesi yang sesuai
+    for (int i = 0; i < _jadwalObat.length; i++) {
+      final sesi = _jadwalObat[i]['sesi']?.toLowerCase() ?? '';
+      if (sesi == targetSession) {
+        return i;
+      }
+    }
+    
+    // Fallback: jika tidak ditemukan, return 0
+    return 0;
+  }
+
+  bool _isAllMedicationsInSessionChecked(int sessionIndex) {
+    if (sessionIndex >= _jadwalObat.length) return false;
+    
+    String targetSession = _jadwalObat[sessionIndex]['sesi'] ?? '';
+    List<int> sameSessionIndices = [];
+    
+    for (int i = 0; i < _jadwalObat.length; i++) {
+      if (_jadwalObat[i]['sesi'] == targetSession) {
+        sameSessionIndices.add(i);
+      }
+    }
+    
+    for (int index in sameSessionIndices) {
+      if (!_sesiStatus[index]) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  int? _getNextUncheckedInSession(int currentIndex) {
+    String targetSession = _jadwalObat[currentIndex]['sesi'] ?? '';
+    
+    for (int i = 0; i < _jadwalObat.length; i++) {
+      if (_jadwalObat[i]['sesi'] == targetSession && !_sesiStatus[i]) {
+        return i;
+      }
+    }
+    return null;
+  }
+
   Future<void> _konfirmasiMinum(int index) async {
     if (_sesiStatus[index]) {
       await _batalkanMinum(index);
       return;
     }
+
+    // CEK APAKAH DIPERBOLEHKAN MENCENTANG
+    String sesiName = _jadwalObat[index]['sesi'] ?? '';
+    if (!_canCheckMedication(sesiName)) {
+      String message = _getCannotCheckMessage(sesiName);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: Colors.orange,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+      return;
+    }
+
+    if (_isTransitioning[index]) return;
 
     final dbHelper = DatabaseHelper();
     int? userId = widget.userId ?? dbHelper.getCurrentUserId();
@@ -240,26 +338,28 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       );
       
-      // Cari sesi berikutnya yang belum diminum
-      int nextIndex = -1;
-      for (int i = index + 1; i < _jadwalObat.length; i++) {
-        if (!_sesiStatus[i]) {
-          nextIndex = i;
-          break;
-        }
-      }
-      
-      // Auto pindah ke sesi berikutnya
-      if (nextIndex != -1) {
-        await Future.delayed(const Duration(seconds: 1));
-        if (mounted && _pageController.hasClients) {
-          await _pageController.animateToPage(
-            nextIndex,
-            duration: const Duration(milliseconds: 300),
-            curve: Curves.easeInOut,
-          );
+      // Auto-swipe ke obat berikutnya dalam sesi yang sama (jika ada)
+      if (!_isAllMedicationsInSessionChecked(index)) {
+        int? nextInSession = _getNextUncheckedInSession(index);
+        
+        if (nextInSession != null && nextInSession != index) {
           setState(() {
-            _currentSesiIndex = nextIndex;
+            _isTransitioning[index] = true;
+          });
+          
+          _autoSwipeTimer?.cancel();
+          _autoSwipeTimer = Timer(const Duration(seconds: 3), () async {
+            if (mounted && _pageController.hasClients) {
+              await _pageController.animateToPage(
+                nextInSession,
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeInOut,
+              );
+              setState(() {
+                _currentSesiIndex = nextInSession!;
+                _isTransitioning[index] = false;
+              });
+            }
           });
         }
       }
@@ -332,96 +432,6 @@ class _HomeScreenState extends State<HomeScreen> {
       case 'malam': return 'MALAM';
       default: return sesi.toUpperCase();
     }
-  }
-
-  // Fungsi untuk menentukan sesi aktif berdasarkan waktu dengan toleransi 1 jam
-  int _getActiveSesiIndexByTime() {
-    if (_jadwalObat.isEmpty) return 0;
-    
-    final now = DateTime.now();
-    final currentMinutes = now.hour * 60 + now.minute;
-    const toleransiMenit = 60; // 1 jam toleransi
-    
-    // Urutan sesi berdasarkan waktu (Pagi -> Siang -> Malam)
-    // Asumsi: Pagi jam 07:00, Siang jam 12:00, Malam jam 19:00
-    // Atau ambil dari data jadwal yang sudah disimpan
-    
-    // Urutkan sesi berdasarkan jam yang di-set user
-    List<Map<String, dynamic>> sesiWithTime = [];
-    for (int i = 0; i < _jadwalObat.length; i++) {
-      final obat = _jadwalObat[i];
-      final waktuStr = obat['waktu'] ?? '07:00';
-      final waktuMinutes = _parseWaktuToMinutes(waktuStr);
-      sesiWithTime.add({
-        'index': i,
-        'sesi': obat['sesi']?.toLowerCase() ?? '',
-        'waktu': waktuMinutes,
-      });
-    }
-    
-    // Urutkan berdasarkan waktu
-    sesiWithTime.sort((a, b) => a['waktu'].compareTo(b['waktu']));
-    
-    // Cari sesi yang waktu-nya masih dalam toleransi
-    for (var sesi in sesiWithTime) {
-      final waktuSesi = sesi['waktu'] as int;
-      final batasWaktu = waktuSesi + toleransiMenit;
-      
-      // Jika waktu sekarang masih dalam batas toleransi sesi ini
-      if (currentMinutes <= batasWaktu) {
-        return sesi['index'] as int;
-      }
-    }
-    
-    // Jika semua sesi sudah lewat toleransi, kembalikan sesi terakhir
-    if (sesiWithTime.isNotEmpty) {
-      return sesiWithTime.last['index'] as int;
-    }
-    
-    return 0;
-  }
-
-  // Helper untuk parse waktu
-  int _parseWaktuToMinutes(String waktu) {
-    try {
-      // Bersihkan string: hilangkan AM/PM dan spasi
-      String cleanTime = waktu.trim();
-      
-      // Cek apakah format AM/PM
-      if (cleanTime.contains('AM') || cleanTime.contains('PM')) {
-        List<String> parts = cleanTime.split(' ');
-        if (parts.length != 2) return 0;
-        
-        String timePart = parts[0];
-        String period = parts[1];
-        
-        List<String> hourMinute = timePart.split(':');
-        if (hourMinute.length != 2) return 0;
-        
-        int hour = int.parse(hourMinute[0]);
-        int minute = int.parse(hourMinute[1]);
-        
-        if (period == 'PM' && hour != 12) {
-          hour += 12;
-        } else if (period == 'AM' && hour == 12) {
-          hour = 0;
-        }
-        
-        return hour * 60 + minute;
-      } 
-      // Format 24 jam (HH:MM)
-      else {
-        final parts = waktu.split(':');
-        if (parts.length == 2) {
-          int hour = int.parse(parts[0]);
-          int minute = int.parse(parts[1]);
-          return hour * 60 + minute;
-        }
-      }
-    } catch (e) {
-      print('Error parsing waktu: $waktu');
-    }
-    return 0;
   }
 
   void _onNavBarTap(int index) {
@@ -552,8 +562,12 @@ class _HomeScreenState extends State<HomeScreen> {
                         child: PageView.builder(
                           controller: _pageController,
                           onPageChanged: (index) {
+                            _autoSwipeTimer?.cancel();
                             setState(() {
                               _currentSesiIndex = index;
+                              for (int i = 0; i < _isTransitioning.length; i++) {
+                                _isTransitioning[i] = false;
+                              }
                             });
                           },
                           itemCount: _jadwalObat.length,
@@ -576,7 +590,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     else
                       const SizedBox(height: 380, child: Center(child: Text('Tidak ada jadwal obat'))),
                     
-                    // Indicator dot (hanya tampil jika lebih dari 1 sesi)
+                    // Indicator dot
                     if (_jadwalObat.length > 1)
                       Padding(
                         padding: const EdgeInsets.only(top: 8),
@@ -598,7 +612,6 @@ class _HomeScreenState extends State<HomeScreen> {
                           }),
                         ),
                       ),
-                    
 
                     const SizedBox(height: 16),
 
@@ -657,8 +670,8 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 }
-  
-// ==================== WIDGET- WIDGET DI BAWAH ====================
+
+// ==================== WIDGETS ====================
 
 class _TopBar extends StatelessWidget {
   final String name;
@@ -1032,18 +1045,22 @@ class _ObatCard extends StatelessWidget {
     required this.onKonfirmasi,
   });
 
+  String getWaktuMakanText() {
+    if (waktuMakan.isEmpty) return 'Informasi waktu makan tidak tersedia';
+    
+    final waktuMakanLower = waktuMakan.toLowerCase();
+    
+    if (waktuMakanLower.contains('sebelum')) {
+      return 'Diminum sebelum makan';
+    } else if (waktuMakanLower.contains('sesudah') || waktuMakanLower.contains('setelah')) {
+      return 'Diminum setelah makan';
+    }
+    
+    return waktuMakan;
+  }
+
   @override
   Widget build(BuildContext context) {
-    String getWaktuMakanText() {
-      if (waktuMakan.isEmpty) return 'Informasi waktu makan tidak tersedia';
-      if (waktuMakan.toLowerCase().contains('sebelum')) {
-        return 'Diminum sebelum makan';
-      } else if (waktuMakan.toLowerCase().contains('sesudah')) {
-        return 'Diminum sesudah makan';
-      }
-      return waktuMakan;
-    }
-
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
       decoration: BoxDecoration(
