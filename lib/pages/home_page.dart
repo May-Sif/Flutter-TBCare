@@ -143,6 +143,9 @@ class _HomeScreenState extends State<HomeScreen> {
       // Load data berat badan terbaru
       await _loadBeratBadanData(userId);
       
+      // Cek status screening
+      await _checkScreeningStatus(userId);
+
       setState(() => _isLoading = false);
       
     } catch (e) {
@@ -224,6 +227,108 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {});
   }
 
+  Future<void> _checkScreeningStatus(int userId) async {
+    final dbHelper = DatabaseHelper();
+    final db = await dbHelper.database;
+    
+    // Hitung minggu ke berapa sekarang (berdasarkan tanggal diagnosis)
+    final user = await dbHelper.getUserById(userId);
+    DateTime? tglDiagnosis;
+    
+    if (user != null && user['tanggal_diagnosis'] != null) {
+      tglDiagnosis = _parseDateSafely(user['tanggal_diagnosis']);
+    }
+    
+    if (tglDiagnosis == null) {
+      setState(() {
+        _sudahIsiSkrining = false;
+        _gejalaTinggi = [];
+        _gejalaSedang = [];
+      });
+      return;
+    }
+    
+    final now = DateTime.now();
+    int mingguKe = (now.difference(tglDiagnosis).inDays / 7).floor() + 1;
+    mingguKe = mingguKe.clamp(1, 24);
+    
+    // Cek apakah sudah ada screening untuk minggu ini
+    final screening = await db.query(
+      'screening_mingguan',
+      where: 'user_id = ? AND minggu_ke = ?',
+      whereArgs: [userId, mingguKe],
+    );
+    
+    if (screening.isNotEmpty) {
+      // Ambil screening terbaru
+      final screeningData = screening.first;
+      
+      // Ambil efek samping (gejala) dari screening ini
+      final efekSamping = await db.query(
+        'efek_samping',
+        where: 'user_id = ? AND tanggal = ?',
+        whereArgs: [userId, screeningData['tanggal_screening']],
+      );
+      
+      // Pisahkan gejala tinggi dan sedang
+      List<String> gejalaTinggi = [];
+      List<String> gejalaSedang = [];
+      
+      for (var efek in efekSamping) {
+        String namaEfek = efek['efek'] as String;
+        // Cek apakah gejala termasuk tinggi atau sedang
+        if (namaEfek.contains('⚠️') || 
+            namaEfek.contains('drastis') || 
+            namaEfek.contains('berat') ||
+            namaEfek.contains('sering') ||
+            namaEfek.contains('darah')) {
+          gejalaTinggi.add(namaEfek);
+        } else {
+          gejalaSedang.add(namaEfek);
+        }
+      }
+      
+      setState(() {
+        _sudahIsiSkrining = true;
+        _gejalaTinggi = gejalaTinggi;
+        _gejalaSedang = gejalaSedang;
+      });
+    } else {
+      setState(() {
+        _sudahIsiSkrining = false;
+        _gejalaTinggi = [];
+        _gejalaSedang = [];
+      });
+    }
+  }
+
+  // Helper untuk parse tanggal
+  DateTime? _parseDateSafely(dynamic dateValue) {
+    if (dateValue == null) return null;
+    
+    try {
+      String dateString = dateValue.toString();
+      
+      if (dateString.contains('-') && dateString.length == 10) {
+        return DateTime.parse(dateString);
+      }
+      
+      if (dateString.contains('/')) {
+        final parts = dateString.split('/');
+        if (parts.length == 3) {
+          final day = int.parse(parts[0]);
+          final month = int.parse(parts[1]);
+          final year = int.parse(parts[2]);
+          return DateTime(year, month, day);
+        }
+      }
+      
+      return DateTime.parse(dateString);
+    } catch (e) {
+      print('Error parsing date: $dateValue - $e');
+      return null;
+    }
+  }
   String _getSkorLabel(int skor) {
     switch (skor) {
       case 1: return 'Ringan';
@@ -681,6 +786,10 @@ class _HomeScreenState extends State<HomeScreen> {
                                 }
                                 if (widget.userId != null) {
                                   await _loadBeratBadanData(widget.userId!);
+                                }
+
+                                if (widget.userId != null) {
+                                  await _checkScreeningStatus(widget.userId!);
                                 }
                               },
                             ),
