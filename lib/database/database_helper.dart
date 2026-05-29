@@ -124,6 +124,7 @@ class DatabaseHelper {
         skor INTEGER NOT NULL,
         status TEXT NOT NULL,
         kesimpulan_hasil TEXT NOT NULL,
+        berat_badan_saat_ini REAL,
         FOREIGN KEY (user_id) REFERENCES user (id) ON DELETE CASCADE
       )
     ''');
@@ -178,6 +179,13 @@ class DatabaseHelper {
           skor_default INTEGER NOT NULL
         )
       ''');
+
+      try {
+        await db.execute('ALTER TABLE screening_mingguan ADD COLUMN berat_badan_saat_ini REAL');
+        print('Berhasil menambah kolom berat_badan_saat_ini');
+      } catch (e) {
+        print('Error saat migrasi: $e');
+      }
       
       // Insert data efek samping default (hanya jika tabel kosong)
       final List<Map<String, dynamic>> existing = await db.query('list_efek_samping');
