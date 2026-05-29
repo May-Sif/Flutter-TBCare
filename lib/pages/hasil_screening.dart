@@ -11,10 +11,23 @@ class HasilScreeningPage extends StatelessWidget {
   static const Color _bgColor = Color(0xFFF8FAFC);
   static const Color _cardColor = Colors.white;
 
-  int get _skor => hasilData['skor'] as int? ?? 0;
+  double get _severity => hasilData['skor'] as double? ?? 0;
+  
+  bool get _adaDahakBerdarah => hasilData['adaDahakBerdarah'] as bool? ?? false;
 
   _StatusInfo get _statusInfo {
-    if (_skor <= 2) {
+    if (_adaDahakBerdarah) {
+      return _StatusInfo(
+        label: '⚠️ DARURAT: SEGERA KE PUSKESMAS',
+        warna: const Color(0xFFDC2626),
+        warnaRing: const Color(0xFFDC2626),
+        warnaBg: const Color(0xFFFEE2E2),
+        icon: Icons.emergency,
+        pesan: 'Ditemukan dahak berdarah! Segera konsultasikan ke dokter atau puskesmas terdekat.',
+      );
+    }
+    
+    if (_severity <= 25) {
       return _StatusInfo(
         label: 'Status: Baik',
         warna: const Color(0xFF0D9488),
@@ -23,7 +36,7 @@ class HasilScreeningPage extends StatelessWidget {
         icon: Icons.check_circle_outline,
         pesan: 'Kondisi Anda membaik.\nTeruskan pengobatan secara teratur.',
       );
-    } else if (_skor <= 4) {
+    } else if (_severity <= 50) {
       return _StatusInfo(
         label: 'Status: Perlu Pemantauan',
         warna: const Color(0xFFD97706),
@@ -32,14 +45,23 @@ class HasilScreeningPage extends StatelessWidget {
         icon: Icons.warning_amber_rounded,
         pesan: 'Ada gejala yang belum membaik.\nSaran: pantau 1 minggu lagi.',
       );
+    } else if (_severity <= 75) {
+      return _StatusInfo(
+        label: 'Status: Waspada',
+        warna: const Color(0xFFEA580C),
+        warnaRing: const Color(0xFFEA580C),
+        warnaBg: const Color(0xFFFFEDD5),
+        icon: Icons.notification_important,
+        pesan: 'Gejala cukup signifikan.\nSegera konsultasikan ke dokter.',
+      );
     } else {
       return _StatusInfo(
-        label: 'Status: Segera Konsultasi',
+        label: 'Status: Risiko Tinggi',
         warna: const Color(0xFFDC2626),
         warnaRing: const Color(0xFFDC2626),
         warnaBg: const Color(0xFFFEE2E2),
         icon: Icons.local_hospital_outlined,
-        pesan: 'Gejala cukup berat.\nSegera hubungi dokter atau puskesmas.',
+        pesan: 'Gejala berat! Segera hubungi dokter atau puskesmas.',
       );
     }
   }
@@ -48,7 +70,7 @@ class HasilScreeningPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final info = _statusInfo;
     final beratBadan = hasilData['beratBadan'] as String? ?? '-';
-    final efekSamping = hasilData['efekSamping'] as String? ?? '-';
+    final gejala = hasilData['efekSamping'] as String? ?? '-';
     final assessment = hasilData['assessment'] as String? ?? '-';
 
     return Scaffold(
@@ -74,7 +96,7 @@ class HasilScreeningPage extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 12),
-                    _buildKesimpulanCard(beratBadan, efekSamping, assessment),
+                    _buildKesimpulanCard(beratBadan, gejala, assessment),
                     const SizedBox(height: 28),
                     _buildKembaliButton(context),
                     const SizedBox(height: 24),
@@ -92,10 +114,23 @@ class HasilScreeningPage extends StatelessWidget {
     return Container(
       color: _cardColor,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      child: const Row(
+      child: Row(
         children: [
-          Text(
-            'SCREENING MINGGUAN',
+          GestureDetector(
+            onTap: () => Navigator.pop(context),
+            child: Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: _bgColor,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.arrow_back, size: 20, color: Color(0xFF374151)),
+            ),
+          ),
+          const SizedBox(width: 12),
+          const Text(
+            'HASIL SCREENING',
             style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.w700,
@@ -133,13 +168,23 @@ class HasilScreeningPage extends StatelessWidget {
               border: Border.all(color: info.warnaRing, width: 8),
             ),
             child: Center(
-              child: Text(
-                'Skor: $_skor',
-                style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  color: const Color(0xFF111827),
-                ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    '${_severity.toStringAsFixed(1)}%',
+                    style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF111827),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'Severity',
+                    style: TextStyle(fontSize: 11, color: Color(0xFF6B7280)),
+                  ),
+                ],
               ),
             ),
           ),
@@ -158,7 +203,7 @@ class HasilScreeningPage extends StatelessWidget {
                 Text(
                   info.label,
                   style: TextStyle(
-                    fontSize: 15,
+                    fontSize: 14,
                     fontWeight: FontWeight.bold,
                     color: info.warna,
                   ),
@@ -191,7 +236,7 @@ class HasilScreeningPage extends StatelessWidget {
     );
   }
 
-  Widget _buildKesimpulanCard(String beratBadan, String efekSamping, String assessment) {
+  Widget _buildKesimpulanCard(String beratBadan, String gejala, String assessment) {
     return Container(
       decoration: BoxDecoration(
         color: _cardColor,
@@ -215,18 +260,18 @@ class HasilScreeningPage extends StatelessWidget {
             showDivider: true,
           ),
           _buildKesimpulanItem(
-            icon: Icons.layers_outlined,
+            icon: Icons.list_alt_outlined, // Icon yang valid
             iconBg: const Color(0xFFFFEDD5),
             iconColor: const Color(0xFFEA580C),
-            judul: 'Efek Samping',
-            isi: efekSamping,
+            judul: 'Gejala yang Dilaporkan',
+            isi: gejala.isEmpty || gejala == '-' ? 'Tidak ada gejala yang dilaporkan' : gejala,
             showDivider: true,
           ),
           _buildKesimpulanItem(
             icon: Icons.assignment_turned_in_outlined,
             iconBg: const Color(0xFFDCFCE7),
             iconColor: const Color(0xFF16A34A),
-            judul: 'Assessment Utama',
+            judul: 'Assessment',
             isi: assessment,
             showDivider: false,
           ),
@@ -299,7 +344,7 @@ class HasilScreeningPage extends StatelessWidget {
       height: 52,
       child: ElevatedButton(
         onPressed: () {
-          Navigator.pop(context);
+          Navigator.popUntil(context, (route) => route.isFirst);
         },
         style: ElevatedButton.styleFrom(
           backgroundColor: const Color(0xFF0D9488),
