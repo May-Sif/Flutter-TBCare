@@ -6,7 +6,7 @@ import 'package:tbc_app/pages/profile_page.dart';
 import 'package:tbc_app/pages/calendar_page.dart';
 import 'package:tbc_app/pages/riwayat_kesehatan_page.dart';
 import 'package:tbc_app/pages/form_screening.dart';
-import 'package:tbc_app/pages/hasil_screening.dart';
+import 'package:tbc_app/pages/detail_efek_samping.dart';
 
 class HomeScreen extends StatefulWidget {
   final String email;
@@ -28,32 +28,43 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 0;
-  
   bool _isLoading = true;
-  bool _obatSudahDiminum = false;
+  
+  // Data efek samping
   bool _adaEfekSamping = false;
-  double _beratBadan = 0;
-  double _selisihBerat = 0;
-  String _namaObat = '';
-  String _jamObat = '';
-  String _efekKemarin = '';
-  String _efekHariIni = '';
+  String _latestEfekSamping = '';
+  String _latestEfekSampingDate = '';
+  int _latestEfekSampingSkor = 0;
+  
+  // Data user
+  String _userName = '';
+  String _userEmail = '';
+  
+  // Data obat untuk swipe
+  List<Map<String, dynamic>> _jadwalObat = [];
+  List<bool> _sesiStatus = [];
+  int _currentSesiIndex = 0;
+  PageController _pageController = PageController(); // LANGSUNG DIINISIALISASI
+  
+  // Screening
   bool _sudahIsiSkrining = false;
   List<String> _gejalaTinggi = [];
   List<String> _gejalaSedang = [];
-  Map<String, dynamic> _hasilSkrining = {};
-
-  bool _showTerimaKasih = false;
-  int _obatAktifIndex = 0;
-
-  String _userName = '';
-  String _userEmail = '';
-  List<Map<String, dynamic>> _jadwalObat = [];
+  
+  // Berat badan (sementara dummy)
+  double _beratBadan = 0;
+  double _selisihBerat = 0;
 
   @override
   void initState() {
     super.initState();
     _loadDataFromDatabase();
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadDataFromDatabase() async {
@@ -64,7 +75,6 @@ class _HomeScreenState extends State<HomeScreen> {
       int? userId = widget.userId ?? dbHelper.getCurrentUserId();
       
       if (userId == null) {
-        print('User ID tidak ditemukan');
         setState(() => _isLoading = false);
         return;
       }
@@ -76,25 +86,56 @@ class _HomeScreenState extends State<HomeScreen> {
       _userName = dataDiri['nama'] ?? widget.name;
       _userEmail = widget.email;
       
-      if (_jadwalObat.isNotEmpty) {
-        final firstObat = _jadwalObat.first;
-        _namaObat = firstObat['namaObat'] ?? '';
-        _jamObat = firstObat['waktu'] ?? '';
-      } else {
-        _namaObat = 'Belum ada jadwal obat';
-        _jamObat = '--:--';
-      }
-      
       final today = DateTime.now().toIso8601String().split('T').first;
       final db = await dbHelper.database;
-      final sesiRows = await db.query(
-        'sesi_kepatuhan',
-        where: 'user_id = ? AND tanggal = ? AND sesi_index = ?',
-        whereArgs: [userId, today, _obatAktifIndex],
-      );
-      _obatSudahDiminum = sesiRows.isNotEmpty && (sesiRows.first['status'] as int? ?? 0) == 1;
-      _adaEfekSamping = false; 
-      _sudahIsiSkrining = false;
+      
+      // Load status minum untuk semua sesi
+      _sesiStatus = List.filled(_jadwalObat.length, false);
+      for (int i = 0; i < _jadwalObat.length; i++) {
+        final existing = await db.query(
+          'sesi_kepatuhan',
+          where: 'user_id = ? AND tanggal = ? AND sesi_index = ?',
+          whereArgs: [userId, today, i],
+        );
+        _sesiStatus[i] = existing.isNotEmpty && (existing.first['status'] as int? ?? 0) == 1;
+      }
+      
+      // Tentukan sesi aktif pertama yang belum diminum
+      int activeIndex = 0;
+
+      // Cari sesi yang belum diminum sesuai toleransi waktu
+      int waktuBasedIndex = _getActiveSesiIndexByTime();
+
+      // Cek apakah sesi berdasarkan waktu sudah diminum atau belum
+      if (waktuBasedIndex < _sesiStatus.length && !_sesiStatus[waktuBasedIndex]) {
+        // Jika belum diminum, tampilkan sesi berdasarkan waktu
+        activeIndex = waktuBasedIndex;
+      } else {
+        // Jika sudah diminum, cari sesi berikutnya yang belum diminum
+        activeIndex = -1;
+        for (int i = 0; i < _jadwalObat.length; i++) {
+          if (!_sesiStatus[i]) {
+            activeIndex = i;
+            break;
+          }
+        }
+        // Jika semua sudah diminum, tampilkan yang terakhir
+        if (activeIndex == -1 && _jadwalObat.isNotEmpty) {
+          activeIndex = _jadwalObat.length - 1;
+        }
+      }
+      
+      _currentSesiIndex = activeIndex;
+      
+      // Set PageView ke index yang sesuai
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_pageController.hasClients) {
+          _pageController.jumpToPage(_currentSesiIndex);
+        }
+      });
+      
+      // Load efek samping terbaru
+      await _loadLatestEfekSamping(userId);
       
       setState(() => _isLoading = false);
       
@@ -104,11 +145,55 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  int _konfirmasiToken = 0;
+  Future<void> _loadLatestEfekSamping(int userId) async {
+    final dbHelper = DatabaseHelper();
+    final today = DateTime.now();
+    final yesterday = today.subtract(const Duration(days: 1));
+    
+    var efekList = await dbHelper.getEfekSampingPasienByDate(userId, today);
+    
+    if (efekList.isEmpty) {
+      efekList = await dbHelper.getEfekSampingPasienByDate(userId, yesterday);
+      if (efekList.isNotEmpty) {
+        _latestEfekSampingDate = 'KEMARIN';
+      } else {
+        _latestEfekSampingDate = '';
+        _adaEfekSamping = false;
+        return;
+      }
+    } else {
+      _latestEfekSampingDate = 'HARI INI';
+    }
+    
+    if (efekList.isNotEmpty) {
+      final efekTertinggi = efekList.reduce((a, b) => 
+        (a['skor'] as int) > (b['skor'] as int) ? a : b
+      );
+      
+      _latestEfekSampingSkor = efekTertinggi['skor'] as int;
+      String namaEfek = efekTertinggi['nama_efek_samping'] as String;
+      String level = _getSkorLabel(_latestEfekSampingSkor);
+      _latestEfekSamping = '$namaEfek ($level)';
+      _adaEfekSamping = _latestEfekSampingSkor >= 2;
+    } else {
+      _adaEfekSamping = false;
+    }
+    
+    setState(() {});
+  }
 
-  Future<void> _konfirmasiMinum() async {
-    if (_showTerimaKasih) {
-      _batalkanMinum();
+  String _getSkorLabel(int skor) {
+    switch (skor) {
+      case 1: return 'Ringan';
+      case 2: return 'Sedang';
+      case 3: return 'Berat';
+      default: return '';
+    }
+  }
+
+  Future<void> _konfirmasiMinum(int index) async {
+    if (_sesiStatus[index]) {
+      await _batalkanMinum(index);
       return;
     }
 
@@ -120,11 +205,13 @@ class _HomeScreenState extends State<HomeScreen> {
 
     try {
       final db = await dbHelper.database;
+      
       final existing = await db.query(
         'sesi_kepatuhan',
         where: 'user_id = ? AND tanggal = ? AND sesi_index = ?',
-        whereArgs: [userId, today, _obatAktifIndex],
+        whereArgs: [userId, today, index],
       );
+      
       if (existing.isNotEmpty) {
         await db.update(
           'sesi_kepatuhan',
@@ -136,40 +223,48 @@ class _HomeScreenState extends State<HomeScreen> {
         await db.insert('sesi_kepatuhan', {
           'user_id': userId,
           'tanggal': today,
-          'sesi_index': _obatAktifIndex,
+          'sesi_index': index,
           'status': 1,
         });
       }
-      final allSesi = await db.query(
-        'sesi_kepatuhan',
-        where: 'user_id = ? AND tanggal = ?',
-        whereArgs: [userId, today],
-      );
-      final totalObat = _jadwalObat.length;
-      final sudahSemua = allSesi.where((r) => (r['status'] as int? ?? 0) == 1).length == totalObat;
-      await dbHelper.updateKepatuhan(userId, today, sudahSemua ? 1 : 0);
-
-      final token = ++_konfirmasiToken;
+      
       setState(() {
-        _obatSudahDiminum = true;
-        _showTerimaKasih = true;
+        _sesiStatus[index] = true;
       });
-
-      Future.delayed(const Duration(seconds: 5), () {
-        if (!mounted) return;
-        if (_konfirmasiToken != token) return;
-        setState(() {
-          _showTerimaKasih = false;
-          _obatSudahDiminum = false;
-          if (_jadwalObat.isNotEmpty) {
-            _obatAktifIndex = (_obatAktifIndex + 1) % _jadwalObat.length;
-            _namaObat = _jadwalObat[_obatAktifIndex]['namaObat'] ?? '';
-            _jamObat = _jadwalObat[_obatAktifIndex]['waktu'] ?? '';
-          }
-        });
-      });
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${_jadwalObat[index]['namaObat']} sudah diminum'),
+          backgroundColor: AppColors.success,
+          duration: const Duration(seconds: 1),
+        ),
+      );
+      
+      // Cari sesi berikutnya yang belum diminum
+      int nextIndex = -1;
+      for (int i = index + 1; i < _jadwalObat.length; i++) {
+        if (!_sesiStatus[i]) {
+          nextIndex = i;
+          break;
+        }
+      }
+      
+      // Auto pindah ke sesi berikutnya
+      if (nextIndex != -1) {
+        await Future.delayed(const Duration(seconds: 1));
+        if (mounted && _pageController.hasClients) {
+          await _pageController.animateToPage(
+            nextIndex,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+          );
+          setState(() {
+            _currentSesiIndex = nextIndex;
+          });
+        }
+      }
+      
     } catch (e) {
-      debugPrint('Error updating: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Gagal menyimpan status'),
@@ -179,7 +274,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _batalkanMinum() async {
+  Future<void> _batalkanMinum(int index) async {
     final dbHelper = DatabaseHelper();
     int? userId = widget.userId ?? dbHelper.getCurrentUserId();
     if (userId == null) return;
@@ -191,7 +286,7 @@ class _HomeScreenState extends State<HomeScreen> {
       final existing = await db.query(
         'sesi_kepatuhan',
         where: 'user_id = ? AND tanggal = ? AND sesi_index = ?',
-        whereArgs: [userId, today, _obatAktifIndex],
+        whereArgs: [userId, today, index],
       );
       if (existing.isNotEmpty) {
         await db.update(
@@ -201,20 +296,19 @@ class _HomeScreenState extends State<HomeScreen> {
           whereArgs: [existing.first['id']],
         );
       }
-      await dbHelper.updateKepatuhan(userId, today, 0);
-      _konfirmasiToken++;
+      
       setState(() {
-        _obatSudahDiminum = false;
-        _showTerimaKasih = false;
+        _sesiStatus[index] = false;
       });
-    } catch (e) {
-      debugPrint('Error membatalkan kepatuhan: $e');
+      
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Gagal membatalkan status'),
-          backgroundColor: Colors.red,
+          content: Text('Status minum obat dibatalkan'),
+          backgroundColor: Colors.orange,
         ),
       );
+    } catch (e) {
+      debugPrint('Error membatalkan kepatuhan: $e');
     }
   }
 
@@ -231,54 +325,152 @@ class _HomeScreenState extends State<HomeScreen> {
     return n.split(' ').first.split('@').first;
   }
 
-  void _onNavBarTap(int index) {
-    if (index == _currentIndex) return; // Sudah di halaman yang sama
+  String _getSesiName(String sesi) {
+    switch (sesi.toLowerCase()) {
+      case 'pagi': return 'PAGI';
+      case 'siang': return 'SIANG';
+      case 'malam': return 'MALAM';
+      default: return sesi.toUpperCase();
+    }
+  }
+
+  // Fungsi untuk menentukan sesi aktif berdasarkan waktu dengan toleransi 1 jam
+  int _getActiveSesiIndexByTime() {
+    if (_jadwalObat.isEmpty) return 0;
     
-    // Halaman index 0: Beranda (HomeScreen)
+    final now = DateTime.now();
+    final currentMinutes = now.hour * 60 + now.minute;
+    const toleransiMenit = 60; // 1 jam toleransi
+    
+    // Urutan sesi berdasarkan waktu (Pagi -> Siang -> Malam)
+    // Asumsi: Pagi jam 07:00, Siang jam 12:00, Malam jam 19:00
+    // Atau ambil dari data jadwal yang sudah disimpan
+    
+    // Urutkan sesi berdasarkan jam yang di-set user
+    List<Map<String, dynamic>> sesiWithTime = [];
+    for (int i = 0; i < _jadwalObat.length; i++) {
+      final obat = _jadwalObat[i];
+      final waktuStr = obat['waktu'] ?? '07:00';
+      final waktuMinutes = _parseWaktuToMinutes(waktuStr);
+      sesiWithTime.add({
+        'index': i,
+        'sesi': obat['sesi']?.toLowerCase() ?? '',
+        'waktu': waktuMinutes,
+      });
+    }
+    
+    // Urutkan berdasarkan waktu
+    sesiWithTime.sort((a, b) => a['waktu'].compareTo(b['waktu']));
+    
+    // Cari sesi yang waktu-nya masih dalam toleransi
+    for (var sesi in sesiWithTime) {
+      final waktuSesi = sesi['waktu'] as int;
+      final batasWaktu = waktuSesi + toleransiMenit;
+      
+      // Jika waktu sekarang masih dalam batas toleransi sesi ini
+      if (currentMinutes <= batasWaktu) {
+        return sesi['index'] as int;
+      }
+    }
+    
+    // Jika semua sesi sudah lewat toleransi, kembalikan sesi terakhir
+    if (sesiWithTime.isNotEmpty) {
+      return sesiWithTime.last['index'] as int;
+    }
+    
+    return 0;
+  }
+
+  // Helper untuk parse waktu
+  int _parseWaktuToMinutes(String waktu) {
+    try {
+      // Bersihkan string: hilangkan AM/PM dan spasi
+      String cleanTime = waktu.trim();
+      
+      // Cek apakah format AM/PM
+      if (cleanTime.contains('AM') || cleanTime.contains('PM')) {
+        List<String> parts = cleanTime.split(' ');
+        if (parts.length != 2) return 0;
+        
+        String timePart = parts[0];
+        String period = parts[1];
+        
+        List<String> hourMinute = timePart.split(':');
+        if (hourMinute.length != 2) return 0;
+        
+        int hour = int.parse(hourMinute[0]);
+        int minute = int.parse(hourMinute[1]);
+        
+        if (period == 'PM' && hour != 12) {
+          hour += 12;
+        } else if (period == 'AM' && hour == 12) {
+          hour = 0;
+        }
+        
+        return hour * 60 + minute;
+      } 
+      // Format 24 jam (HH:MM)
+      else {
+        final parts = waktu.split(':');
+        if (parts.length == 2) {
+          int hour = int.parse(parts[0]);
+          int minute = int.parse(parts[1]);
+          return hour * 60 + minute;
+        }
+      }
+    } catch (e) {
+      print('Error parsing waktu: $waktu');
+    }
+    return 0;
+  }
+
+  void _onNavBarTap(int index) {
+    if (index == _currentIndex) return;
+    
     if (index == 0) {
       setState(() => _currentIndex = index);
       return;
     }
     
-    // Halaman index 1: Jadwal → CalendarPage
     if (index == 1) {
       Navigator.push(
         context,
         MaterialPageRoute(builder: (_) => const CalendarPage()),
-      ).then((_) {
-        // Ketika kembali ke HomeScreen, reset index ke 0 (Beranda)
+      ).then((_) async {
         if (mounted) {
           setState(() => _currentIndex = 0);
+          await Future.delayed(const Duration(milliseconds: 200));
+          _loadDataFromDatabase();
         }
       });
       return;
     }
     
-    // Halaman index 2: Statistik → RiwayatKesehatanPage
     if (index == 2) {
       Navigator.push(
         context,
         MaterialPageRoute(
           builder: (_) => RiwayatKesehatanPage(userId: widget.userId),
         ),
-      ).then((_) {
+      ).then((_) async {
         if (mounted) {
           setState(() => _currentIndex = 0);
+          await _loadDataFromDatabase();
         }
       });
       return;
     }
     
-    // Halaman index 3: Profil → ProfilPage
     if (index == 3) {
       Navigator.push(
         context,
         MaterialPageRoute(
           builder: (_) => ProfilPage(userId: widget.userId),
         ),
-      ).then((_) {
+      ).then((_) async {
         if (mounted) {
           setState(() => _currentIndex = 0);
+          await _loadDataFromDatabase();
         }
       });
       return;
@@ -291,6 +483,22 @@ class _HomeScreenState extends State<HomeScreen> {
       return Scaffold(
         backgroundColor: AppColors.background,
         body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    if (_jadwalObat.isEmpty) {
+      return Scaffold(
+        backgroundColor: AppColors.background,
+        body: const Center(
+          child: Text(
+            'Belum ada jadwal obat',
+            style: TextStyle(fontSize: 16, color: AppColors.textSecondary),
+          ),
+        ),
+        bottomNavigationBar: AppBottomNav(
+          currentIndex: _currentIndex,
+          onTap: _onNavBarTap,
+        ),
       );
     }
 
@@ -310,34 +518,90 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // ── Greeting ──────────────────────────
                     _GreetingSection(
                       greeting: _greetingTime,
                       name: _displayName,
                     ),
                     const SizedBox(height: 16),
 
-                    // ── Card peringatan gabungan ───────────
                     if (_adaEfekSamping) ...[
                       _PeringatanGabunganCard(
-                        efekKemarin: _efekKemarin,
-                        efekHariIni: _efekHariIni,
+                        efekTerbaru: _latestEfekSamping,
+                        tanggalLabel: _latestEfekSampingDate,
+                        skor: _latestEfekSampingSkor,
                         onTapPeringatan: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => DetailEfekSampingPage(
+                                userId: widget.userId,
+                                tahun: DateTime.now().year,
+                                bulan: DateTime.now().month,
+                              ),
+                            ),
+                          );
                         },
                       ),
                       const SizedBox(height: 16),
                     ],
 
-                    // ── Card obat ──────────────────────────
-                    _ObatCard(
-                      namaObat: _namaObat,
-                      jam: _jamObat,
-                      sudahDiminum: _obatSudahDiminum,
-                      onKonfirmasi: _konfirmasiMinum,
-                    ),
+                    // PageView untuk swipe antar sesi
+                    if (_jadwalObat.isNotEmpty)
+                      SizedBox(
+                        height: 380,
+                        child: PageView.builder(
+                          controller: _pageController,
+                          onPageChanged: (index) {
+                            setState(() {
+                              _currentSesiIndex = index;
+                            });
+                          },
+                          itemCount: _jadwalObat.length,
+                          itemBuilder: (context, index) {
+                            final obat = _jadwalObat[index];
+                            final sudahDiminum = _sesiStatus[index];
+                            final namaSesi = _getSesiName(obat['sesi'] ?? '');
+                            
+                            return _ObatCard(
+                              namaSesi: namaSesi,
+                              namaObat: obat['namaObat'] ?? '',
+                              jam: obat['waktu'] ?? '',
+                              waktuMakan: obat['waktuMakan'] ?? '',
+                              sudahDiminum: sudahDiminum,
+                              onKonfirmasi: () => _konfirmasiMinum(index),
+                            );
+                          },
+                        ),
+                      )
+                    else
+                      const SizedBox(height: 380, child: Center(child: Text('Tidak ada jadwal obat'))),
+                    
+                    // Indicator dot (hanya tampil jika lebih dari 1 sesi)
+                    if (_jadwalObat.length > 1)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: List.generate(_jadwalObat.length, (index) {
+                            return AnimatedContainer(
+                              duration: const Duration(milliseconds: 200),
+                              margin: const EdgeInsets.symmetric(horizontal: 4),
+                              width: _currentSesiIndex == index ? 20 : 8,
+                              height: 8,
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(4),
+                                color: _currentSesiIndex == index 
+                                    ? AppColors.primary 
+                                    : Colors.grey.shade300,
+                              ),
+                            );
+                          }),
+                        ),
+                      ),
+                    
+
                     const SizedBox(height: 16),
 
-                    // ── Card bawah ──
                     IntrinsicHeight(
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -346,8 +610,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             child: _BeratBadanCard(
                               beratBadan: _beratBadan,
                               selisih: _selisihBerat,
-                              onUpdate: () {
-                              },
+                              onUpdate: () {},
                             ),
                           ),
                           const SizedBox(width: 12),
@@ -394,6 +657,8 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 }
+  
+// ==================== WIDGET- WIDGET DI BAWAH ====================
 
 class _TopBar extends StatelessWidget {
   final String name;
@@ -483,7 +748,6 @@ class _TopBar extends StatelessWidget {
   }
 }
 
-// ── Greeting Section ──
 class _GreetingSection extends StatelessWidget {
   final String greeting;
   final String name;
@@ -588,20 +852,45 @@ class _RibbonPainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter old) => false;
 }
 
-// ── PeringatanGabunganCard ──
 class _PeringatanGabunganCard extends StatelessWidget {
-  final String efekKemarin;
-  final String efekHariIni;
+  final String efekTerbaru;
+  final String tanggalLabel;
+  final int skor;
   final VoidCallback? onTapPeringatan;
 
   const _PeringatanGabunganCard({
-    required this.efekKemarin,
-    required this.efekHariIni,
+    required this.efekTerbaru,
+    required this.tanggalLabel,
+    required this.skor,
     this.onTapPeringatan,
   });
 
   @override
   Widget build(BuildContext context) {
+    Color getWarningColor() {
+      if (skor >= 3) return const Color(0xFFD32F2F);
+      if (skor >= 2) return const Color(0xFFFF9800);
+      return const Color(0xFFFFC107);
+    }
+    
+    String getWarningText() {
+      if (skor >= 3) return 'DARURAT: SEGERA KE PUSKESMAS / RS!';
+      if (skor >= 2) return 'PERINGATAN: SEGERA KONSULTASI KE DOKTER';
+      return 'PERHATIAN: PANTAU GEJALA ANDA';
+    }
+    
+    String getLevelText() {
+      if (skor >= 3) return 'BERAT';
+      if (skor >= 2) return 'SEDANG';
+      return 'RINGAN';
+    }
+    
+    Color getLevelColor() {
+      if (skor >= 3) return const Color(0xFFD32F2F);
+      if (skor >= 2) return const Color(0xFFFF9800);
+      return const Color(0xFFFFC107);
+    }
+
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
@@ -641,12 +930,12 @@ class _PeringatanGabunganCard extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFF8F00),
+                    color: getLevelColor(),
                     borderRadius: BorderRadius.circular(20),
                   ),
-                  child: const Text(
-                    'WASPADA',
-                    style: TextStyle(
+                  child: Text(
+                    getLevelText(),
+                    style: const TextStyle(
                       fontSize: 10,
                       fontWeight: FontWeight.bold,
                       color: Colors.white,
@@ -665,9 +954,9 @@ class _PeringatanGabunganCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
-                        'KEMARIN',
-                        style: TextStyle(
+                      Text(
+                        tanggalLabel,
+                        style: const TextStyle(
                           fontSize: 10,
                           fontWeight: FontWeight.w700,
                           color: Color(0xFF8D6E63),
@@ -676,41 +965,11 @@ class _PeringatanGabunganCard extends StatelessWidget {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        efekKemarin,
+                        efekTerbaru,
                         style: const TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w700,
                           color: Color(0xFFBF360C),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Container(
-                  width: 1,
-                  height: 36,
-                  color: const Color(0xFFE0E0E0),
-                  margin: const EdgeInsets.symmetric(horizontal: 12),
-                ),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'HARI INI',
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
-                          color: Color(0xFF8D6E63),
-                          letterSpacing: 0.6,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        efekHariIni,
-                        style: const TextStyle(
-                          fontSize: 13,
-                          color: Color(0xFF8D6E63),
                         ),
                       ),
                     ],
@@ -724,18 +983,22 @@ class _PeringatanGabunganCard extends StatelessWidget {
             child: Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-              decoration: const BoxDecoration(
-                color: Color(0xFFD32F2F),
-                borderRadius: BorderRadius.vertical(bottom: Radius.circular(13)),
+              decoration: BoxDecoration(
+                color: getWarningColor(),
+                borderRadius: const BorderRadius.vertical(bottom: Radius.circular(13)),
               ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
-                children: const [
-                  Icon(Icons.star_rounded, color: Colors.white, size: 15),
-                  SizedBox(width: 8),
+                children: [
+                  Icon(
+                    skor >= 3 ? Icons.emergency : Icons.star_rounded,
+                    color: Colors.white,
+                    size: 15,
+                  ),
+                  const SizedBox(width: 8),
                   Text(
-                    'PERINGATAN: SEGERA KE PUSKESMAS / RSI',
-                    style: TextStyle(
+                    getWarningText(),
+                    style: const TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.bold,
                       color: Colors.white,
@@ -752,26 +1015,39 @@ class _PeringatanGabunganCard extends StatelessWidget {
   }
 }
 
-// ── ObatCard  ──
 class _ObatCard extends StatelessWidget {
+  final String namaSesi;
   final String namaObat;
   final String jam;
+  final String waktuMakan;
   final bool sudahDiminum;
   final VoidCallback onKonfirmasi;
 
   const _ObatCard({
+    required this.namaSesi,
     required this.namaObat,
     required this.jam,
+    required this.waktuMakan,
     required this.sudahDiminum,
     required this.onKonfirmasi,
   });
 
   @override
   Widget build(BuildContext context) {
+    String getWaktuMakanText() {
+      if (waktuMakan.isEmpty) return 'Informasi waktu makan tidak tersedia';
+      if (waktuMakan.toLowerCase().contains('sebelum')) {
+        return 'Diminum sebelum makan';
+      } else if (waktuMakan.toLowerCase().contains('sesudah')) {
+        return 'Diminum sesudah makan';
+      }
+      return waktuMakan;
+    }
+
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
       decoration: BoxDecoration(
-        color: const Color(0xFFDCEEFB),
+        color: sudahDiminum ? AppColors.success.withOpacity(0.1) : const Color(0xFFDCEEFB),
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
@@ -786,11 +1062,19 @@ class _ObatCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Text(
-                'Obat Selanjutnya:',
-                style: TextStyle(
-                  fontSize: 13,
-                  color: AppColors.textSecondary,
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: sudahDiminum ? AppColors.success : AppColors.primary,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  namaSesi,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
                 ),
               ),
               const Spacer(),
@@ -799,13 +1083,6 @@ class _ObatCard extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(20),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.06),
-                      blurRadius: 4,
-                      offset: const Offset(0, 1),
-                    ),
-                  ],
                 ),
                 child: Text(
                   jam,
@@ -818,7 +1095,7 @@ class _ObatCard extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 8),
           Text(
             namaObat,
             style: const TextStyle(
@@ -845,17 +1122,14 @@ class _ObatCard extends StatelessWidget {
                     height: 88,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: sudahDiminum
-                          ? AppColors.success.withOpacity(0.08)
-                          : Colors.white,
+                      color: sudahDiminum ? AppColors.success.withOpacity(0.08) : Colors.white,
                       border: Border.all(
                         color: sudahDiminum ? AppColors.success : AppColors.primary,
                         width: 2.5,
                       ),
                       boxShadow: [
                         BoxShadow(
-                          color: (sudahDiminum ? AppColors.success : AppColors.primary)
-                              .withOpacity(0.18),
+                          color: (sudahDiminum ? AppColors.success : AppColors.primary).withOpacity(0.18),
                           blurRadius: 16,
                           offset: const Offset(0, 4),
                         ),
@@ -871,7 +1145,7 @@ class _ObatCard extends StatelessWidget {
                 const SizedBox(height: 14),
                 Text(
                   sudahDiminum
-                      ? 'Terima Kasih telah rutin meminum obat!\nTekan lagi untuk membatalkan'
+                      ? 'Terima Kasih telah meminum obat!\nTekan lagi untuk membatalkan'
                       : 'Tekan tombol di atas untuk\nkonfirmasi minum obat',
                   textAlign: TextAlign.center,
                   style: TextStyle(
@@ -893,13 +1167,21 @@ class _ObatCard extends StatelessWidget {
             ),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
-              children: const [
-                Icon(Icons.info_outline_rounded, color: Color(0xFFFF8F00), size: 16),
-                SizedBox(width: 8),
+              children: [
+                Icon(
+                  waktuMakan.toLowerCase().contains('sebelum') 
+                      ? Icons.free_breakfast_outlined 
+                      : (waktuMakan.toLowerCase().contains('sesudah')
+                          ? Icons.dinner_dining_outlined
+                          : Icons.info_outline_rounded),
+                  color: const Color(0xFFFF8F00),
+                  size: 16,
+                ),
+                const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    'Pastikan diminum saat perut kosong atau sesuai anjuran dokter.',
-                    style: TextStyle(fontSize: 12, color: Color(0xFF795548)),
+                    getWaktuMakanText(),
+                    style: const TextStyle(fontSize: 12, color: Color(0xFF795548)),
                   ),
                 ),
               ],
@@ -911,7 +1193,6 @@ class _ObatCard extends StatelessWidget {
   }
 }
 
-// ── BeratBadanCard  ──
 class _BeratBadanCard extends StatelessWidget {
   final double beratBadan;
   final double selisih;
@@ -1008,7 +1289,6 @@ class _BeratBadanCard extends StatelessWidget {
   }
 }
 
-// ── SkriningCard ──
 class _SkriningCard extends StatelessWidget {
   final bool sudahIsi;
   final List<String> gejalaTinggi;

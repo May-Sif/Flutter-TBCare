@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:tbc_app/theme.dart';
-import 'package:tbc_app/widgets/app_bottom_nav.dart';
 import 'package:tbc_app/database/database_helper.dart';
 
 class DetailEfekSampingPage extends StatefulWidget {
@@ -24,15 +23,27 @@ class _DetailEfekSampingPageState extends State<DetailEfekSampingPage> {
   int _selectedMonth = DateTime.now().month;
   DateTime _selectedDate = DateTime.now();
   
-  Map<String, List<String>> _efekSampingMap = {};
+  // Map untuk menyimpan efek samping per tanggal (dengan skor)
+  Map<String, List<Map<String, dynamic>>> _efekSampingMap = {};
+  
+  // Map untuk menyimpan status kepatuhan obat per tanggal
+  // true = semua sesi diminum, false = ada yang terlewat
+  Map<String, bool> _kepatuhanMap = {};
+  
+  // Map untuk menyimpan jumlah sesi yang diminum per tanggal
+  Map<String, int> _jumlahSesiDiminumMap = {};
+  
+  // Map untuk menyimpan total sesi obat per user
+  int _totalSesiObat = 0;
+  
   bool _isLoading = true;
   List<Map<String, dynamic>> _riwayatPerubahan = [];
   bool _isLoadingHistory = true;
   
-  // ScrollController untuk mengontrol scroll horizontal
-  final ScrollController _scrollController = ScrollController();
+  // Daftar efek samping yang tersedia (dari database)
+  List<Map<String, dynamic>> _listEfekSamping = [];
   
-  // Flag untuk menandai apakah sudah pernah scroll ke today
+  final ScrollController _scrollController = ScrollController();
   bool _hasScrolledToToday = false;
   
   final List<String> _namaBulan = [
@@ -45,8 +56,8 @@ class _DetailEfekSampingPageState extends State<DetailEfekSampingPage> {
     super.initState();
     _selectedYear = widget.tahun ?? DateTime.now().year;
     _selectedMonth = widget.bulan ?? DateTime.now().month;
-    _loadEfekSamping();
-    _loadRiwayatPerubahan();
+    _selectedDate = DateTime.now();
+    _loadData();
   }
 
   @override
@@ -55,58 +66,104 @@ class _DetailEfekSampingPageState extends State<DetailEfekSampingPage> {
     super.dispose();
   }
 
-  // Fungsi untuk scroll ke tanggal tertentu
-  void _scrollToDate(DateTime targetDate, List<DateTime> days) {
-    if (!mounted) return;
-    
-    // Cari index tanggal target
-    final targetIndex = days.indexWhere((date) => 
-      date.year == targetDate.year && 
-      date.month == targetDate.month && 
-      date.day == targetDate.day
-    );
-    
-    // Jika ditemukan, scroll ke posisi tersebut
-    if (targetIndex != -1 && _scrollController.hasClients) {
-      // Hitung offset scroll (lebar item 65 + padding 4 = 69)
-      // plus padding horizontal 20
-      final offset = (targetIndex * 69.0) - 20;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (_scrollController.hasClients) {
-          _scrollController.jumpTo(offset > 0 ? offset : 0);
-        }
-      });
-    }
-  }
-
-  Future<void> _loadEfekSamping() async {
+  Future<void> _loadData() async {
     setState(() => _isLoading = true);
     
     final dbHelper = DatabaseHelper();
     int? userId = widget.userId ?? dbHelper.getCurrentUserId();
     
     if (userId != null) {
-      _efekSampingMap = await dbHelper.getEfekSampingByMonth(userId, _selectedYear, _selectedMonth);
+      // Ambil total sesi obat untuk user ini
+      _totalSesiObat = await dbHelper.getTotalSesiObat(userId);
+      
+      await Future.wait([
+        _loadListEfekSamping(dbHelper),
+        _loadEfekSamping(userId),
+        _loadKepatuhanBulanan(userId),
+        _loadRiwayatPerubahan(userId),
+      ]);
     }
     
     setState(() => _isLoading = false);
-    _hasScrolledToToday = false; // Reset flag saat loading ulang
+    
+    // Scroll ke tanggal hari ini
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && !_hasScrolledToToday) {
+        final days = _getDaysInMonth();
+        final today = DateTime.now();
+        final isCurrentMonth = _selectedYear == today.year && _selectedMonth == today.month;
+        
+        if (isCurrentMonth) {
+          _scrollToToday(days);
+          _hasScrolledToToday = true;
+        }
+      }
+    });
   }
 
-  Future<void> _loadRiwayatPerubahan() async {
-    setState(() => _isLoadingHistory = true);
-    
+  Future<void> _loadListEfekSamping(DatabaseHelper dbHelper) async {
+    final result = await dbHelper.getAllListEfekSamping();
+    setState(() {
+      _listEfekSamping = result;
+    });
+  }
+
+  Future<void> _loadEfekSamping(int userId) async {
     final dbHelper = DatabaseHelper();
-    int? userId = widget.userId ?? dbHelper.getCurrentUserId();
+    _efekSampingMap = await dbHelper.getEfekSampingPasienByMonth(userId, _selectedYear, _selectedMonth);
+  }
+
+  Future<void> _loadKepatuhanBulanan(int userId) async {
+    final dbHelper = DatabaseHelper();
+    final days = _getDaysInMonth();
     
-    if (userId != null) {
-      _riwayatPerubahan = await dbHelper.getRiwayatPerubahanObatByMonth(
-        userId, 
-        _selectedYear, 
-        _selectedMonth
-      );
+    _kepatuhanMap.clear();
+    _jumlahSesiDiminumMap.clear();
+    
+    for (var date in days) {
+      final semuaDiminum = await dbHelper.isAllSesiObatDiminum(userId, date);
+      _kepatuhanMap[_getDateKey(date)] = semuaDiminum;
+      
+      final jumlahDiminum = await dbHelper.getJumlahSesiDiminum(userId, date);
+      _jumlahSesiDiminumMap[_getDateKey(date)] = jumlahDiminum;
     }
+  }
+
+  Future<void> _loadRiwayatPerubahan(int userId) async {
+    final dbHelper = DatabaseHelper();
+    _riwayatPerubahan = await dbHelper.getRiwayatPerubahanObatByMonth(
+      userId, 
+      _selectedYear, 
+      _selectedMonth
+    );
     setState(() => _isLoadingHistory = false);
+  }
+
+  void _scrollToToday(List<DateTime> days) {
+    if (!mounted || !_scrollController.hasClients) return;
+    
+    final today = DateTime.now();
+    final todayIndex = days.indexWhere((date) => 
+      date.year == today.year && 
+      date.month == today.month && 
+      date.day == today.day
+    );
+    
+    if (todayIndex != -1) {
+      final screenWidth = MediaQuery.of(context).size.width;
+      final itemWidth = 69.0;
+      final targetOffset = (todayIndex * itemWidth) - (screenWidth / 2) + (itemWidth / 2);
+      
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_scrollController.hasClients) {
+          _scrollController.animateTo(
+            targetOffset > 0 ? targetOffset : 0,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOut,
+          );
+        }
+      });
+    }
   }
 
   Future<void> _changeMonth(int delta) async {
@@ -120,15 +177,32 @@ class _DetailEfekSampingPageState extends State<DetailEfekSampingPage> {
         _selectedYear++;
       }
     });
-    _hasScrolledToToday = false; // Reset flag saat ganti bulan
-    await _loadEfekSamping();
-    await _loadRiwayatPerubahan();
     
-    // Setelah ganti bulan, pilih tanggal yang sesuai
+    _hasScrolledToToday = false;
+    
+    final dbHelper = DatabaseHelper();
+    int? userId = widget.userId ?? dbHelper.getCurrentUserId();
+    
+    if (userId != null) {
+      setState(() => _isLoading = true);
+      await Future.wait([
+        _loadEfekSamping(userId),
+        _loadKepatuhanBulanan(userId),
+        _loadRiwayatPerubahan(userId),
+      ]);
+      setState(() => _isLoading = false);
+    }
+    
     final now = DateTime.now();
     if (_selectedYear == now.year && _selectedMonth == now.month) {
       setState(() {
         _selectedDate = now;
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          final days = _getDaysInMonth();
+          _scrollToToday(days);
+        }
       });
     } else {
       setState(() {
@@ -147,9 +221,52 @@ class _DetailEfekSampingPageState extends State<DetailEfekSampingPage> {
     return days;
   }
 
-  List<String> _getGejalaForDate(DateTime date) {
-    final dateStr = '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+  List<Map<String, dynamic>> _getEfekSampingForDate(DateTime date) {
+    final dateStr = _getDateKey(date);
     return _efekSampingMap[dateStr] ?? [];
+  }
+
+  String _getDateKey(DateTime date) {
+    return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+  }
+
+  // Cek apakah semua sesi obat diminum
+  bool _isAllObatDiminum(DateTime date) {
+    return _kepatuhanMap[_getDateKey(date)] ?? false;
+  }
+  
+  // Dapatkan jumlah sesi yang diminum
+  int _getJumlahSesiDiminum(DateTime date) {
+    return _jumlahSesiDiminumMap[_getDateKey(date)] ?? 0;
+  }
+
+  // Dapatkan nama efek samping berdasarkan ID
+  String _getNamaEfekSamping(int id) {
+    final efek = _listEfekSamping.firstWhere(
+      (e) => e['id'] == id,
+      orElse: () => {'nama_efek_samping': 'Tidak diketahui'},
+    );
+    return efek['nama_efek_samping'] as String;
+  }
+
+  // Dapatkan warna berdasarkan skor
+  Color _getSkorColor(int skor) {
+    switch (skor) {
+      case 1: return Colors.green;
+      case 2: return Colors.orange;
+      case 3: return Colors.red;
+      default: return Colors.grey;
+    }
+  }
+
+  // Dapatkan label skor
+  String _getSkorLabel(int skor) {
+    switch (skor) {
+      case 1: return 'Ringan';
+      case 2: return 'Sedang';
+      case 3: return 'Berat';
+      default: return '';
+    }
   }
 
   @override
@@ -163,19 +280,7 @@ class _DetailEfekSampingPageState extends State<DetailEfekSampingPage> {
 
     final days = _getDaysInMonth();
     final today = DateTime.now();
-    final hasEfek = (date) => _getGejalaForDate(date).isNotEmpty;
-    
-    // Cek apakah bulan yang ditampilkan adalah bulan berjalan
     final isCurrentMonth = _selectedYear == today.year && _selectedMonth == today.month;
-
-    // Scroll ke tanggal hari ini jika:
-    // 1. Belum pernah scroll ke today
-    // 2. Controller sudah tersedia
-    // 3. Ini adalah bulan berjalan
-    if (!_hasScrolledToToday && _scrollController.hasClients && isCurrentMonth) {
-      _hasScrolledToToday = true;
-      _scrollToDate(today, days);
-    }
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -237,7 +342,7 @@ class _DetailEfekSampingPageState extends State<DetailEfekSampingPage> {
             ),
             const SizedBox(height: 12),
 
-            // DATE LIST
+            // DATE LIST - Menampilkan status KEPATUHAN OBAT
             SizedBox(
               height: 100,
               child: ListView.builder(
@@ -250,8 +355,21 @@ class _DetailEfekSampingPageState extends State<DetailEfekSampingPage> {
                   final isSelected = _selectedDate.year == date.year && 
                                      _selectedDate.month == date.month && 
                                      _selectedDate.day == date.day;
-                  final isChecked = hasEfek(date);
-                  final isWarning = false;
+                  final isAllObatDiminum = _isAllObatDiminum(date);
+                  final jumlahDiminum = _getJumlahSesiDiminum(date);
+                  final isToday = date.year == today.year && 
+                                  date.month == today.month && 
+                                  date.day == today.day;
+                  
+                  // Tentukan status kepatuhan untuk ditampilkan di DateCard
+                  KepatuhanStatus status;
+                  if (isAllObatDiminum) {
+                    status = KepatuhanStatus.selesai; // Centang hijau
+                  } else if (jumlahDiminum > 0) {
+                    status = KepatuhanStatus.sebagian; // Warning orange (ada yang diminum tapi belum semua)
+                  } else {
+                    status = KepatuhanStatus.kosong; // Belum ada yang diminum
+                  }
                   
                   return Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 4),
@@ -261,8 +379,8 @@ class _DetailEfekSampingPageState extends State<DetailEfekSampingPage> {
                         dayName: _getDayName(date.weekday),
                         date: date.day.toString(),
                         isSelected: isSelected,
-                        isChecked: isChecked,
-                        isWarning: isWarning,
+                        status: status,
+                        isToday: isToday,
                       ),
                     ),
                   );
@@ -271,7 +389,7 @@ class _DetailEfekSampingPageState extends State<DetailEfekSampingPage> {
             ),
             const SizedBox(height: 20),
 
-            // GEJALA HARI INI
+            // EFEK SAMPING HARI INI (dengan skor)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               child: Container(
@@ -291,21 +409,89 @@ class _DetailEfekSampingPageState extends State<DetailEfekSampingPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      "Gejala ${_selectedDate.day} ${_namaBulan[_selectedDate.month - 1]} $_selectedYear",
-                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    Row(
+                      children: [
+                        Text(
+                          "Efek Samping ${_selectedDate.day} ${_namaBulan[_selectedDate.month - 1]} $_selectedYear",
+                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                        ),
+                        const Spacer(),
+                        // Tampilkan status kepatuhan obat hari ini
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: _isAllObatDiminum(_selectedDate) 
+                                ? AppColors.success.withOpacity(0.1) 
+                                : (_getJumlahSesiDiminum(_selectedDate) > 0
+                                    ? Colors.orange.withOpacity(0.1)
+                                    : Colors.grey.withOpacity(0.1)),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                _isAllObatDiminum(_selectedDate) 
+                                    ? Icons.check_circle 
+                                    : (_getJumlahSesiDiminum(_selectedDate) > 0
+                                        ? Icons.warning_amber_rounded
+                                        : Icons.access_time),
+                                size: 14,
+                                color: _isAllObatDiminum(_selectedDate) 
+                                    ? AppColors.success 
+                                    : (_getJumlahSesiDiminum(_selectedDate) > 0
+                                        ? Colors.orange
+                                        : Colors.grey),
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                _isAllObatDiminum(_selectedDate) 
+                                    ? "Patuh (${_getJumlahSesiDiminum(_selectedDate)}/$_totalSesiObat)" 
+                                    : (_getJumlahSesiDiminum(_selectedDate) > 0
+                                        ? "Sebagian (${_getJumlahSesiDiminum(_selectedDate)}/$_totalSesiObat)"
+                                        : "Belum minum obat"),
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: _isAllObatDiminum(_selectedDate) 
+                                      ? AppColors.success 
+                                      : (_getJumlahSesiDiminum(_selectedDate) > 0
+                                          ? Colors.orange
+                                          : Colors.grey),
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 14),
-                    ..._getGejalaForDate(_selectedDate).map((gejala) => Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: SymptomCard(title: gejala),
-                    )),
-                    if (_getGejalaForDate(_selectedDate).isEmpty)
+                    
+                    // Tampilkan daftar efek samping dengan skor
+                    ..._getEfekSampingForDate(_selectedDate).map((efek) {
+                      final efekSampingId = efek['efek_samping_id'] as int;
+                      final namaEfek = _getNamaEfekSamping(efekSampingId);
+                      final skor = efek['skor'] as int;
+                      final keterangan = efek['keterangan'] ?? '';
+                      
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: EfekSampingCard(
+                          namaEfek: namaEfek,
+                          skor: skor,
+                          skorLabel: _getSkorLabel(skor),
+                          skorColor: _getSkorColor(skor),
+                          keterangan: keterangan,
+                        ),
+                      );
+                    }),
+                    
+                    if (_getEfekSampingForDate(_selectedDate).isEmpty)
                       const Padding(
                         padding: EdgeInsets.symmetric(vertical: 20),
                         child: Center(
                           child: Text(
-                            'Tidak ada gejala yang dicatat pada hari ini',
+                            'Tidak ada efek samping yang dicatat pada hari ini',
                             style: TextStyle(color: AppColors.textSecondary),
                           ),
                         ),
@@ -328,14 +514,19 @@ class _DetailEfekSampingPageState extends State<DetailEfekSampingPage> {
                       style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                     ),
                     const SizedBox(height: 4),
-                    Row(
-                      children: const [
-                        Text(
-                          "Lihat Semua",
-                          style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
-                        ),
-                        Icon(Icons.chevron_right, size: 16, color: AppColors.textSecondary),
-                      ],
+                    GestureDetector(
+                      onTap: () {
+                        // TODO: Navigasi ke halaman riwayat perubahan obat lengkap
+                      },
+                      child: Row(
+                        children: const [
+                          Text(
+                            "Lihat Semua",
+                            style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
+                          ),
+                          Icon(Icons.chevron_right, size: 16, color: AppColors.textSecondary),
+                        ],
+                      ),
                     ),
                     const SizedBox(height: 16),
                     Expanded(
@@ -394,21 +585,28 @@ class _DetailEfekSampingPageState extends State<DetailEfekSampingPage> {
   }
 }
 
-// DateCard (sama seperti sebelumnya)
+// Enum untuk status kepatuhan
+enum KepatuhanStatus {
+  selesai,    // Centang hijau (semua sesi diminum)
+  sebagian,   // Warning orange (ada yang diminum tapi belum semua)
+  kosong,     // Lingkaran kosong (belum ada yang diminum)
+}
+
+// DateCard - untuk menampilkan status KEPATUHAN OBAT per hari
 class DateCard extends StatelessWidget {
   final String dayName;
   final String date;
   final bool isSelected;
-  final bool isChecked;
-  final bool isWarning;
+  final KepatuhanStatus status;
+  final bool isToday;
 
   const DateCard({
     super.key,
     required this.dayName,
     required this.date,
     this.isSelected = false,
-    this.isChecked = false,
-    this.isWarning = false,
+    this.status = KepatuhanStatus.kosong,
+    this.isToday = false,
   });
 
   @override
@@ -419,31 +617,90 @@ class DateCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: isSelected ? AppColors.primaryLight : Colors.white,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.primaryLight, width: 0.8),
+        border: Border.all(
+          color: isToday ? AppColors.primary : AppColors.primaryLight, 
+          width: isToday ? 2 : 0.8,
+        ),
       ),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Text(dayName, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+          Text(
+            dayName, 
+            style: TextStyle(
+              fontSize: 12, 
+              color: isToday ? AppColors.primary : Colors.grey,
+              fontWeight: isToday ? FontWeight.bold : FontWeight.normal,
+            ),
+          ),
           const SizedBox(height: 2),
-          Text(date, style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: isSelected ? AppColors.textPrimary : AppColors.textPrimary)),
+          Text(
+            date, 
+            style: TextStyle(
+              fontSize: 20, 
+              fontWeight: FontWeight.bold, 
+              color: isSelected ? AppColors.textPrimary : AppColors.textPrimary,
+            ),
+          ),
           const SizedBox(height: 2),
-          if (isChecked)
-            const Icon(Icons.check_circle_outline, color: AppColors.success, size: 18)
-          else if (isWarning)
-            const Icon(Icons.sync_problem, color: Colors.orange, size: 16)
-          else
-            Container(width: 16, height: 16, decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: Colors.grey.shade300, width: 1.5))),
+          _buildStatusIcon(),
         ],
       ),
     );
   }
+
+  Widget _buildStatusIcon() {
+    switch (status) {
+      case KepatuhanStatus.selesai:
+        // Centang hijau - semua sesi obat diminum
+        return const Icon(Icons.check_circle, color: AppColors.success, size: 18);
+        
+      case KepatuhanStatus.sebagian:
+        // Warning orange - ada yang diminum tapi belum semua
+        return const Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 18);
+        
+      case KepatuhanStatus.kosong:
+        // Lingkaran kosong - belum ada yang diminum
+        if (isToday) {
+          return Container(
+            width: 16, 
+            height: 16, 
+            decoration: BoxDecoration(
+              shape: BoxShape.circle, 
+              color: AppColors.primary,
+            ),
+            child: const Icon(Icons.circle, size: 8, color: Colors.white),
+          );
+        } else {
+          return Container(
+            width: 16, 
+            height: 16, 
+            decoration: BoxDecoration(
+              shape: BoxShape.circle, 
+              border: Border.all(color: Colors.grey.shade300, width: 1.5),
+            ),
+          );
+        }
+    }
+  }
 }
 
-// SymptomCard
-class SymptomCard extends StatelessWidget {
-  final String title;
-  const SymptomCard({super.key, required this.title});
+// EfekSampingCard - untuk menampilkan EFEK SAMPING dengan skor
+class EfekSampingCard extends StatelessWidget {
+  final String namaEfek;
+  final int skor;
+  final String skorLabel;
+  final Color skorColor;
+  final String keterangan;
+
+  const EfekSampingCard({
+    super.key,
+    required this.namaEfek,
+    required this.skor,
+    required this.skorLabel,
+    required this.skorColor,
+    this.keterangan = '',
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -453,14 +710,98 @@ class SymptomCard extends StatelessWidget {
         color: AppColors.cardProfil,
         borderRadius: BorderRadius.circular(16),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(width: 36, height: 36, decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle)),
-          const SizedBox(width: 12),
-          Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500, color: AppColors.textPrimary)),
+          Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: skorColor.withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  _getIconForEfek(namaEfek),
+                  color: skorColor,
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      namaEfek,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                    if (keterangan.isNotEmpty)
+                      Text(
+                        keterangan,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: skorColor.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: skorColor,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      skorLabel,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: skorColor,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );
+  }
+
+  IconData _getIconForEfek(String namaEfek) {
+    if (namaEfek.contains('Mual')) return Icons.sick;
+    if (namaEfek.contains('Gatal')) return Icons.sanitizer;
+    if (namaEfek.contains('Pusing')) return Icons.water_damage;
+    if (namaEfek.contains('Nyeri')) return Icons.favorite_border;
+    if (namaEfek.contains('Demam')) return Icons.thermostat;
+    if (namaEfek.contains('Kuning')) return Icons.warning_amber_rounded;
+    if (namaEfek.contains('Penglihatan')) return Icons.visibility_off;
+    if (namaEfek.contains('Dahak')) return Icons.water_drop;
+    if (namaEfek.contains('Kejang')) return Icons.medical_services;
+    if (namaEfek.contains('Urine')) return Icons.water_drop;
+    if (namaEfek.contains('Perdarahan')) return Icons.bloodtype;
+    if (namaEfek.contains('Nafsu')) return Icons.restaurant;
+    return Icons.medication;
   }
 }
 
