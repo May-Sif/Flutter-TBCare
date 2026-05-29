@@ -12,17 +12,54 @@ class FormScreeningPage extends StatefulWidget {
 }
 
 class _FormScreeningPageState extends State<FormScreeningPage> {
-  int? _answer1;
-  int? _answer2;
-  int? _answer3;
-  int? _answer4;
-  int? _answer5;
-  int? _answer6;
+  int? _answer1; // batuk: 0=Tidak, 1=Berkurang, 2=Sama/memburuk
+  int? _answer2; // nyeri dada: 0=Tidak, 1=Kadang, 2=Sering
+  int? _answer3; // dahak: 0=Tidak ada, 1=Dahak biasa, 3=Ada darah (special!)
+  int? _answer4; // demam: 0=Tidak, 1=Kadang, 2=Sering
+  int? _answer5; // sesak: 0=Tidak, 1=Ringan, 2=Berat
+  int? _answer6; // berat badan: 0=Stabil, 1=Turun sedikit, 2=Turun drastis
   bool _isSubmitting = false;
 
   static const Color _primaryColor = Color(0xFF0D9488);
   static const Color _bgColor = Color(0xFFF8FAFC);
   static const Color _cardColor = Colors.white;
+
+  // Bobot persentase (dalam desimal) - Hanya untuk perhitungan internal
+  double get _bobot1 => 0.15;
+  double get _bobot2 => 0.10;
+  double get _bobot3 => 0.20;
+  double get _bobot4 => 0.15;
+  double get _bobot5 => 0.10;
+  double get _bobot6 => 0.15;
+
+  bool get _adaDahakBerdarah => _answer3 == 3;
+
+  double get _weightedScore {
+    double score = 0;
+    
+    if (_answer1 != null) score += (_answer1! * _bobot1);
+    if (_answer2 != null) score += (_answer2! * _bobot2);
+    if (_answer3 != null) score += (_answer3! * _bobot3);
+    if (_answer4 != null) score += (_answer4! * _bobot4);
+    if (_answer5 != null) score += (_answer5! * _bobot5);
+    if (_answer6 != null) score += (_answer6! * _bobot6);
+    
+    return score;
+  }
+
+  double get _maxWeightedScore => 1.9;
+  
+  double get _severityPercentage => (_weightedScore / _maxWeightedScore) * 100;
+
+  String get _finalStatus {
+    if (_adaDahakBerdarah) return 'RISIKO_TINGGI';
+    
+    double percentage = _severityPercentage;
+    if (percentage <= 25) return 'ON_TRACK';
+    if (percentage <= 50) return 'PERLU_PEMANTAUAN';
+    if (percentage <= 75) return 'WASPADA';
+    return 'RISIKO_TINGGI';
+  }
 
   int get _answeredCount {
     int count = 0;
@@ -39,7 +76,7 @@ class _FormScreeningPageState extends State<FormScreeningPage> {
     final list = <String>[];
     if (_answer1 == 2) list.add('Batuk sama / memburuk');
     if (_answer2 == 2) list.add('Nyeri dada sering / berat');
-    if (_answer3 == 2) list.add('Ada darah saat batuk');
+    if (_answer3 == 3) list.add('Ada darah saat batuk ⚠️');
     if (_answer4 == 2) list.add('Demam / keringat malam sering');
     if (_answer5 == 2) list.add('Sesak napas berat / saat istirahat');
     if (_answer6 == 2) list.add('Berat badan turun drastis');
@@ -57,29 +94,24 @@ class _FormScreeningPageState extends State<FormScreeningPage> {
     return list;
   }
 
-  bool get _adaRisikoTinggi => _gejalaTinggi.isNotEmpty;
+  bool get _adaRisikoTinggi => _gejalaTinggi.isNotEmpty || _adaDahakBerdarah;
 
-  int get _totalSkor {
-    return [_answer1, _answer2, _answer3, _answer4, _answer5, _answer6]
-        .fold<int>(0, (sum, a) => sum + (a ?? 0));
-  }
-
-  String _getStatus(int skor) {
-    if (skor <= 2) return 'ON_TRACK';
-    if (skor <= 4) return 'PERLU_PEMANTAUAN';
-    if (skor <= 6) return 'WASPADA';
-    return 'RISIKO_TINGGI';
-  }
-
-  String _getKesimpulanHasil(int skor, List<String> gejalaTinggi, List<String> gejalaSedang) {
-    if (skor <= 2) {
+  String _getKesimpulanHasil() {
+    if (_adaDahakBerdarah) {
+      return '⚠️ Ditemukan dahak berdarah! Segera konsultasikan ke dokter.';
+    }
+    
+    double percentage = _severityPercentage;
+    if (percentage <= 25) {
       return 'Kondisi umum baik. Batuk berkurang, nafsu makan membaik secara signifikan.';
-    } else if (skor <= 4) {
-      String gejala = gejalaSedang.isNotEmpty ? gejalaSedang.join(', ') : 'Beberapa gejala masih terasa';
+    } else if (percentage <= 50) {
+      String gejala = _gejalaSedang.isNotEmpty ? _gejalaSedang.join(', ') : 'Beberapa gejala masih terasa';
       return '$gejala. Perlu pemantauan lebih lanjut.';
-    } else {
-      String gejala = gejalaTinggi.isNotEmpty ? gejalaTinggi.join(', ') : 'Gejala cukup signifikan';
+    } else if (percentage <= 75) {
+      String gejala = _gejalaTinggi.isNotEmpty ? _gejalaTinggi.join(', ') : 'Gejala cukup signifikan';
       return '$gejala. Segera konsultasikan ke dokter.';
+    } else {
+      return '⚠️ Risiko tinggi! Segera konsultasikan ke dokter.';
     }
   }
 
@@ -102,21 +134,43 @@ class _FormScreeningPageState extends State<FormScreeningPage> {
     
     final now = DateTime.now();
     final today = now.toIso8601String().split('T').first;
-    final skor = _totalSkor;
-    final status = _getStatus(skor);
-    final kesimpulanHasil = _getKesimpulanHasil(skor, _gejalaTinggi, _gejalaSedang);
+    final skor = _weightedScore;
+    final status = _finalStatus;
+    final kesimpulanHasil = _getKesimpulanHasil();
     
-    // Hitung minggu ke berapa
     int mingguKe = 1;
     final user = await dbHelper.getUserById(uid);
     if (user != null && user['tanggal_diagnosis'] != null) {
-      final tglDiagnosis = DateTime.parse(user['tanggal_diagnosis']);
-      mingguKe = (now.difference(tglDiagnosis).inDays / 7).floor() + 1;
-      mingguKe = mingguKe.clamp(1, 24);
+      try {
+        String tglDiagnosisStr = user['tanggal_diagnosis'];
+        DateTime tglDiagnosis;
+        
+        if (tglDiagnosisStr.contains('/')) {
+          List<String> parts = tglDiagnosisStr.split('/');
+          if (parts.length == 3) {
+            int day = int.parse(parts[0]);
+            int month = int.parse(parts[1]);
+            int year = int.parse(parts[2]);
+            if (year < 100) year += 2000;
+            tglDiagnosis = DateTime(year, month, day);
+          } else {
+            tglDiagnosis = now;
+          }
+        } else if (tglDiagnosisStr.contains('-')) {
+          tglDiagnosis = DateTime.parse(tglDiagnosisStr);
+        } else {
+          tglDiagnosis = now;
+        }
+        
+        mingguKe = (now.difference(tglDiagnosis).inDays / 7).floor() + 1;
+        mingguKe = mingguKe.clamp(1, 24);
+      } catch (e) {
+        print('Error parsing tanggal diagnosis: $e');
+        mingguKe = 1;
+      }
     }
     
     try {
-      // Simpan ke database screening_mingguan
       final db = await dbHelper.database;
       await db.insert('screening_mingguan', {
         'user_id': uid,
@@ -127,7 +181,6 @@ class _FormScreeningPageState extends State<FormScreeningPage> {
         'kesimpulan_hasil': kesimpulanHasil,
       });
       
-      // Simpan gejala-gejala ke tabel efek_samping jika ada
       if (_gejalaTinggi.isNotEmpty || _gejalaSedang.isNotEmpty) {
         final semuaGejala = [..._gejalaTinggi, ..._gejalaSedang];
         for (var gejala in semuaGejala) {
@@ -140,18 +193,21 @@ class _FormScreeningPageState extends State<FormScreeningPage> {
       }
       
       final hasilData = {
-        'skor': skor,
+        'skor': _severityPercentage.toStringAsFixed(1),
+        'skorMentah': _weightedScore.toStringAsFixed(2),
+        'maxSkor': _maxWeightedScore.toStringAsFixed(2),
         'gejalaTinggi': _gejalaTinggi,
         'gejalaSedang': _gejalaSedang,
         'highRisk': _adaRisikoTinggi,
+        'adaDahakBerdarah': _adaDahakBerdarah,
         'beratBadan': _answer6 == 0
             ? 'Stabil dalam 2 minggu terakhir.'
             : _answer6 == 1
                 ? 'Turun sedikit, perlu dipantau.'
                 : 'Turun drastis, segera konsultasikan.',
-        'efekSamping': _gejalaTinggi.isNotEmpty 
+        'gejala': _gejalaTinggi.isNotEmpty 
             ? _gejalaTinggi.join(', ')
-            : (_gejalaSedang.isNotEmpty ? _gejalaSedang.join(', ') : 'Tidak ada laporan efek samping baru.'),
+            : (_gejalaSedang.isNotEmpty ? _gejalaSedang.join(', ') : 'Tidak ada gejala yang dilaporkan'),
         'assessment': kesimpulanHasil,
       };
 
@@ -172,7 +228,7 @@ class _FormScreeningPageState extends State<FormScreeningPage> {
           'gejalaTinggi': _gejalaTinggi,
           'gejalaSedang': _gejalaSedang,
           'highRisk': _adaRisikoTinggi,
-          'skor': skor,
+          'skor': _severityPercentage,
         });
       }
     } catch (e) {
@@ -226,9 +282,10 @@ class _FormScreeningPageState extends State<FormScreeningPage> {
                       icon: Icons.water_drop_outlined,
                       iconColor: const Color(0xFF3B82F6),
                       question: 'Apakah masih ada dahak\nsaat batuk?',
-                      options: const ['Tidak ada', 'Dahak biasa', 'Ada darah'],
+                      options: const ['Tidak ada', 'Dahak biasa', '⚠️ Ada darah'],
                       selectedIndex: _answer3,
                       onChanged: (val) => setState(() => _answer3 = val),
+                      isHighlight: true,
                     ),
                     const SizedBox(height: 12),
                     _buildQuestion(
@@ -354,11 +411,15 @@ class _FormScreeningPageState extends State<FormScreeningPage> {
     required List<String> options,
     required int? selectedIndex,
     required ValueChanged<int?> onChanged,
+    bool isHighlight = false,
   }) {
     return Container(
       decoration: BoxDecoration(
         color: _cardColor,
         borderRadius: BorderRadius.circular(16),
+        border: isHighlight && selectedIndex == 2 && options[2].contains('Darah')
+            ? Border.all(color: Colors.red, width: 1.5)
+            : null,
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.05),
@@ -400,16 +461,20 @@ class _FormScreeningPageState extends State<FormScreeningPage> {
           const SizedBox(height: 12),
           ...List.generate(options.length, (i) {
             final isSelected = selectedIndex == i;
+            final isDangerOption = isHighlight && i == 2;
+            
             return GestureDetector(
               onTap: () => onChanged(isSelected ? null : i),
               child: Container(
                 margin: const EdgeInsets.only(bottom: 8),
                 decoration: BoxDecoration(
                   color: isSelected
-                      ? _primaryColor.withOpacity(0.06)
+                      ? (isDangerOption ? Colors.red.withOpacity(0.1) : _primaryColor.withOpacity(0.06))
                       : Colors.transparent,
                   border: Border.all(
-                    color: isSelected ? _primaryColor : const Color(0xFFE5E7EB),
+                    color: isSelected
+                        ? (isDangerOption ? Colors.red : _primaryColor)
+                        : const Color(0xFFE5E7EB),
                     width: isSelected ? 1.5 : 1,
                   ),
                   borderRadius: BorderRadius.circular(10),
@@ -423,7 +488,9 @@ class _FormScreeningPageState extends State<FormScreeningPage> {
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
                         border: Border.all(
-                          color: isSelected ? _primaryColor : const Color(0xFFD1D5DB),
+                          color: isSelected
+                              ? (isDangerOption ? Colors.red : _primaryColor)
+                              : const Color(0xFFD1D5DB),
                           width: isSelected ? 5 : 1.5,
                         ),
                         color: Colors.white,
@@ -435,9 +502,10 @@ class _FormScreeningPageState extends State<FormScreeningPage> {
                         options[i],
                         style: TextStyle(
                           fontSize: 14,
-                          color: isSelected ? _primaryColor : const Color(0xFF374151),
-                          fontWeight:
-                              isSelected ? FontWeight.w600 : FontWeight.w400,
+                          color: isSelected
+                              ? (isDangerOption ? Colors.red : _primaryColor)
+                              : const Color(0xFF374151),
+                          fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
                         ),
                       ),
                     ),
