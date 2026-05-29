@@ -18,6 +18,7 @@ class _FormScreeningPageState extends State<FormScreeningPage> {
   int? _answer4;
   int? _answer5;
   int? _answer6;
+  bool _isSubmitting = false;
 
   static const Color _primaryColor = Color(0xFF0D9488);
   static const Color _bgColor = Color(0xFFF8FAFC);
@@ -34,7 +35,6 @@ class _FormScreeningPageState extends State<FormScreeningPage> {
     return count;
   }
 
-  // ── Gejala berat ──
   List<String> get _gejalaTinggi {
     final list = <String>[];
     if (_answer1 == 2) list.add('Batuk sama / memburuk');
@@ -46,7 +46,6 @@ class _FormScreeningPageState extends State<FormScreeningPage> {
     return list;
   }
 
-  // ── Gejala sedang ──
   List<String> get _gejalaSedang {
     final list = <String>[];
     if (_answer1 == 1) list.add('Batuk berkurang');
@@ -60,51 +59,131 @@ class _FormScreeningPageState extends State<FormScreeningPage> {
 
   bool get _adaRisikoTinggi => _gejalaTinggi.isNotEmpty;
 
+  int get _totalSkor {
+    return [_answer1, _answer2, _answer3, _answer4, _answer5, _answer6]
+        .fold<int>(0, (sum, a) => sum + (a ?? 0));
+  }
+
+  String _getStatus(int skor) {
+    if (skor <= 2) return 'ON_TRACK';
+    if (skor <= 4) return 'PERLU_PEMANTAUAN';
+    if (skor <= 6) return 'WASPADA';
+    return 'RISIKO_TINGGI';
+  }
+
+  String _getKesimpulanHasil(int skor, List<String> gejalaTinggi, List<String> gejalaSedang) {
+    if (skor <= 2) {
+      return 'Kondisi umum baik. Batuk berkurang, nafsu makan membaik secara signifikan.';
+    } else if (skor <= 4) {
+      String gejala = gejalaSedang.isNotEmpty ? gejalaSedang.join(', ') : 'Beberapa gejala masih terasa';
+      return '$gejala. Perlu pemantauan lebih lanjut.';
+    } else {
+      String gejala = gejalaTinggi.isNotEmpty ? gejalaTinggi.join(', ') : 'Gejala cukup signifikan';
+      return '$gejala. Segera konsultasikan ke dokter.';
+    }
+  }
+
   Future<void> _submit() async {
+    if (_answeredCount < 6) return;
+    
+    setState(() => _isSubmitting = true);
+    
     final dbHelper = DatabaseHelper();
     final uid = widget.userId ?? dbHelper.getCurrentUserId();
-    final today = DateTime.now().toIso8601String().split('T').first;
-
-    final skor = [_answer1, _answer2, _answer3, _answer4, _answer5, _answer6]
-        .fold<int>(0, (sum, a) => sum + (a ?? 0));
-
-    final hasilData = {
-      'skor': skor,
-      'gejalaTinggi': _gejalaTinggi,
-      'gejalaSedang': _gejalaSedang,
-      'highRisk': _adaRisikoTinggi,
-      'beratBadan': _answer6 == 0
-          ? 'Stabil dalam 2 minggu terakhir.'
-          : _answer6 == 1
-              ? 'Turun sedikit, perlu dipantau.'
-              : 'Turun drastis, segera konsultasikan.',
-      'efekSamping': 'Tidak ada laporan efek samping baru.',
-      'assessment': skor <= 2
-          ? 'Kondisi umum baik. Lanjutkan pengobatan sesuai jadwal.'
-          : skor <= 4
-              ? 'Kondisi umum baik, namun ada gejala yang perlu dipantau. Pantau 1 minggu lagi.'
-              : 'Gejala cukup signifikan. Segera konsultasikan ke dokter atau puskesmas.',
-    };
-
-    if (!context.mounted) return;
-
-    await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => HasilScreeningPage(
-          hasilData: hasilData,
-        ),
-      ),
-    );
-
-    if (context.mounted) {
-      Navigator.pop(context, {
-        'sudahIsi': true,
+    
+    if (uid == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('User tidak ditemukan')),
+      );
+      setState(() => _isSubmitting = false);
+      return;
+    }
+    
+    final now = DateTime.now();
+    final today = now.toIso8601String().split('T').first;
+    final skor = _totalSkor;
+    final status = _getStatus(skor);
+    final kesimpulanHasil = _getKesimpulanHasil(skor, _gejalaTinggi, _gejalaSedang);
+    
+    // Hitung minggu ke berapa
+    int mingguKe = 1;
+    final user = await dbHelper.getUserById(uid);
+    if (user != null && user['tanggal_diagnosis'] != null) {
+      final tglDiagnosis = DateTime.parse(user['tanggal_diagnosis']);
+      mingguKe = (now.difference(tglDiagnosis).inDays / 7).floor() + 1;
+      mingguKe = mingguKe.clamp(1, 24);
+    }
+    
+    try {
+      // Simpan ke database screening_mingguan
+      final db = await dbHelper.database;
+      await db.insert('screening_mingguan', {
+        'user_id': uid,
+        'tanggal_screening': today,
+        'minggu_ke': mingguKe,
+        'skor': skor,
+        'status': status,
+        'kesimpulan_hasil': kesimpulanHasil,
+      });
+      
+      // Simpan gejala-gejala ke tabel efek_samping jika ada
+      if (_gejalaTinggi.isNotEmpty || _gejalaSedang.isNotEmpty) {
+        final semuaGejala = [..._gejalaTinggi, ..._gejalaSedang];
+        for (var gejala in semuaGejala) {
+          await db.insert('efek_samping', {
+            'user_id': uid,
+            'tanggal': today,
+            'efek': gejala,
+          });
+        }
+      }
+      
+      final hasilData = {
+        'skor': skor,
         'gejalaTinggi': _gejalaTinggi,
         'gejalaSedang': _gejalaSedang,
         'highRisk': _adaRisikoTinggi,
-        'skor': skor,
-      });
+        'beratBadan': _answer6 == 0
+            ? 'Stabil dalam 2 minggu terakhir.'
+            : _answer6 == 1
+                ? 'Turun sedikit, perlu dipantau.'
+                : 'Turun drastis, segera konsultasikan.',
+        'efekSamping': _gejalaTinggi.isNotEmpty 
+            ? _gejalaTinggi.join(', ')
+            : (_gejalaSedang.isNotEmpty ? _gejalaSedang.join(', ') : 'Tidak ada laporan efek samping baru.'),
+        'assessment': kesimpulanHasil,
+      };
+
+      if (!mounted) return;
+
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => HasilScreeningPage(
+            hasilData: hasilData,
+          ),
+        ),
+      );
+
+      if (mounted) {
+        Navigator.pop(context, {
+          'sudahIsi': true,
+          'gejalaTinggi': _gejalaTinggi,
+          'gejalaSedang': _gejalaSedang,
+          'highRisk': _adaRisikoTinggi,
+          'skor': skor,
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+      }
     }
   }
 
@@ -378,7 +457,7 @@ class _FormScreeningPageState extends State<FormScreeningPage> {
       width: double.infinity,
       height: 52,
       child: ElevatedButton(
-        onPressed: allAnswered ? _submit : null,
+        onPressed: allAnswered && !_isSubmitting ? _submit : null,
         style: ElevatedButton.styleFrom(
           backgroundColor: _primaryColor,
           disabledBackgroundColor: const Color(0xFFD1D5DB),
@@ -389,14 +468,25 @@ class _FormScreeningPageState extends State<FormScreeningPage> {
             borderRadius: BorderRadius.circular(14),
           ),
         ),
-        child: Text(
-          allAnswered ? 'Kirim Screening' : 'Jawab semua pertanyaan ($_answeredCount/6)',
-          style: const TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 0.3,
-          ),
-        ),
+        child: _isSubmitting
+            ? const SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                ),
+              )
+            : Text(
+                allAnswered 
+                    ? 'Kirim Screening' 
+                    : 'Jawab semua pertanyaan ($_answeredCount/6)',
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.3,
+                ),
+              ),
       ),
     );
   }

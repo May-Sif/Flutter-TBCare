@@ -57,12 +57,10 @@ class _IsiDataObatPageState extends State<IsiDataObatPage> {
   void initState() {
     super.initState();
     
-    // Start with empty medications
     _pagiMedications = SessionMedications(medications: []);
     _siangMedications = SessionMedications(medications: []);
     _malamMedications = SessionMedications(medications: []);
     
-    // Jika ada jadwal obat yang sudah ada, load datanya
     if (widget.existingJadwalObat != null && widget.existingJadwalObat!.isNotEmpty) {
       _loadExistingJadwal(widget.existingJadwalObat!);
     }
@@ -76,7 +74,6 @@ class _IsiDataObatPageState extends State<IsiDataObatPage> {
       String waktuMakan = obat['waktuMakan'] ?? 'Setelah Makan';
       String keterangan = obat['keterangan'] ?? '';
       
-      // Parse waktu string ke TimeOfDay
       TimeOfDay time = _parseTimeString(waktuStr);
       
       Medication newMed = Medication(
@@ -98,7 +95,6 @@ class _IsiDataObatPageState extends State<IsiDataObatPage> {
 
   TimeOfDay _parseTimeString(String timeStr) {
     try {
-      // Format: "7:00 AM" atau "1:00 PM"
       List<String> parts = timeStr.split(' ');
       if (parts.length != 2) return const TimeOfDay(hour: 7, minute: 0);
       
@@ -123,15 +119,56 @@ class _IsiDataObatPageState extends State<IsiDataObatPage> {
     }
   }
 
+  // VALIDASI WAKTU BERDASARKAN SESI
+  bool _isValidTimeForSession(String session, TimeOfDay time) {
+    final hour = time.hour;
+    final minute = time.minute;
+    final totalMinutes = hour * 60 + minute;
+    
+    switch (session) {
+      case 'Pagi':
+        // Pagi: 00:00 - 10:59 (00:00 sampai 10:59)
+        return totalMinutes <= 10 * 60 + 59;
+        
+      case 'Siang':
+        // Siang: 11:00 - 14:59
+        return totalMinutes >= 11 * 60 && totalMinutes <= 14 * 60 + 59;
+        
+      case 'Malam':
+        // Malam: 15:00 - 23:59
+        return totalMinutes >= 15 * 60;
+        
+      default:
+        return true;
+    }
+  }
+
+  String _getValidTimeRange(String session) {
+    switch (session) {
+      case 'Pagi':
+        return '00:00 - 10:59';
+      case 'Siang':
+        return '11:00 - 14:59';
+      case 'Malam':
+        return '15:00 - 23:59';
+      default:
+        return '';
+    }
+  }
+
   Future<void> _selectTime(int sessionIndex, int medIndex) async {
     TimeOfDay currentTime = const TimeOfDay(hour: 7, minute: 0);
+    String sessionName = '';
     
     if (sessionIndex == 0) {
       currentTime = _pagiMedications.medications[medIndex].time;
+      sessionName = 'Pagi';
     } else if (sessionIndex == 1) {
       currentTime = _siangMedications.medications[medIndex].time;
+      sessionName = 'Siang';
     } else if (sessionIndex == 2) {
       currentTime = _malamMedications.medications[medIndex].time;
+      sessionName = 'Malam';
     }
     
     final TimeOfDay? picked = await showTimePicker(
@@ -150,6 +187,19 @@ class _IsiDataObatPageState extends State<IsiDataObatPage> {
     );
 
     if (picked != null) {
+      // VALIDASI WAKTU
+      if (!_isValidTimeForSession(sessionName, picked)) {
+        final range = _getValidTimeRange(sessionName);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Waktu untuk sesi $sessionName harus antara $range'),
+            backgroundColor: Colors.orange,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+        return;
+      }
+      
       setState(() {
         if (sessionIndex == 0) {
           _pagiMedications.medications[medIndex].time = picked;
@@ -162,7 +212,6 @@ class _IsiDataObatPageState extends State<IsiDataObatPage> {
     }
   }
 
-  // Ketika user mengedit obat, catat perubahannya
   Future<void> _saveRiwayatPerubahan(String obatLama, String obatBaru, String alasan) async {
     final dbHelper = DatabaseHelper();
     int? userId = widget.userId ?? dbHelper.getCurrentUserId();
@@ -210,7 +259,59 @@ class _IsiDataObatPageState extends State<IsiDataObatPage> {
     });
   }
 
+  // VALIDASI SEBELUM SUBMIT
+  bool _validateAllTimes() {
+    // Validasi sesi Pagi
+    for (var med in _pagiMedications.medications) {
+      if (med.name.isNotEmpty && !_isValidTimeForSession('Pagi', med.time)) {
+        final range = _getValidTimeRange('Pagi');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Obat "${med.name}" (Pagi) harus antara $range'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return false;
+      }
+    }
+    
+    // Validasi sesi Siang
+    for (var med in _siangMedications.medications) {
+      if (med.name.isNotEmpty && !_isValidTimeForSession('Siang', med.time)) {
+        final range = _getValidTimeRange('Siang');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Obat "${med.name}" (Siang) harus antara $range'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return false;
+      }
+    }
+    
+    // Validasi sesi Malam
+    for (var med in _malamMedications.medications) {
+      if (med.name.isNotEmpty && !_isValidTimeForSession('Malam', med.time)) {
+        final range = _getValidTimeRange('Malam');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Obat "${med.name}" (Malam) harus antara $range'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return false;
+      }
+    }
+    
+    return true;
+  }
+
   void _submit() async {
+    // Validasi semua waktu terlebih dahulu
+    if (!_validateAllTimes()) {
+      return;
+    }
+    
     List<Map<String, dynamic>> jadwalObat = [];
 
     // Kumpulkan obat pagi
@@ -257,7 +358,6 @@ class _IsiDataObatPageState extends State<IsiDataObatPage> {
       dataDiriDynamic = Map<String, dynamic>.from(widget.dataDiri!);
     }
 
-    // TAMPILKAN LOADING
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -265,7 +365,6 @@ class _IsiDataObatPageState extends State<IsiDataObatPage> {
     );
 
     try {
-      // SIMPAN KE DATABASE
       final dbHelper = DatabaseHelper();
       
       int userId = await dbHelper.saveCompleteUserData(
@@ -274,19 +373,16 @@ class _IsiDataObatPageState extends State<IsiDataObatPage> {
         email: widget.email,
       );
       
-      // Set user login
       dbHelper.setLoggedInUser(userId);
       
       if (!mounted) return;
-      Navigator.pop(context); // Tutup loading
+      Navigator.pop(context);
       
-      // Akses nama dengan aman (null safety)
       String namaPasien = '';
       if (widget.dataDiri != null && widget.dataDiri!['nama'] != null) {
         namaPasien = widget.dataDiri!['nama']!;
       }
 
-      // Navigasi ke halaman profil
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
@@ -300,7 +396,7 @@ class _IsiDataObatPageState extends State<IsiDataObatPage> {
       );
     } catch (e) {
       if (!mounted) return;
-      Navigator.pop(context); // Tutup loading
+      Navigator.pop(context);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Gagal menyimpan data: $e'),
@@ -309,7 +405,6 @@ class _IsiDataObatPageState extends State<IsiDataObatPage> {
       );
     }
   }
-
 
   @override
   Widget build(BuildContext context) {
@@ -331,16 +426,6 @@ class _IsiDataObatPageState extends State<IsiDataObatPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Jadwal Obat',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: AppColors.textPrimary,
-              ),
-            ),
-            const SizedBox(height: 20),
-            
             // PAGI SECTION 
             const Text(
               'Pagi',
@@ -444,13 +529,6 @@ class _IsiDataObatPageState extends State<IsiDataObatPage> {
               decoration: BoxDecoration(
                 color: const Color.fromARGB(255, 205, 225, 238),
                 borderRadius: BorderRadius.circular(12),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.grey.withOpacity(0.05),
-                    blurRadius: 4,
-                    offset: const Offset(0, 1),
-                  ),
-                ],
               ),
               child: Column(
                 children: [
@@ -555,33 +633,17 @@ class _IsiDataObatPageState extends State<IsiDataObatPage> {
                   TextFormField(
                     initialValue: med.keterangan,
                     decoration: const InputDecoration(
-                      hintText: 'Keterangan (Optional) - isi jika ada efek samping atau perubahan',
+                      hintText: 'Keterangan (Optional)',
                       border: InputBorder.none,
                       filled: true,
                       fillColor: Colors.white,
                       contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                     ),
                     style: const TextStyle(fontSize: 16),
-                    onChanged: (value) async {
+                    onChanged: (value) {
                       setState(() {
-                        _malamMedications.medications[medIndex].keterangan = value;
+                        _pagiMedications.medications[medIndex].keterangan = value;
                       });
-                      
-                      // Jika keterangan diisi (bukan hanya edit biasa)
-                      if (widget.existingJadwalObat != null && value.isNotEmpty) {
-                        // Bandingkan dengan nilai lama
-                        final oldValue = widget.existingJadwalObat!
-                            .where((o) => o['sesi'] == 'Malam' && o['namaObat'] == med.name)
-                            .firstOrNull?['keterangan'] ?? '';
-                        
-                        if (oldValue != value) {
-                          await _saveRiwayatPerubahan(
-                            med.name,
-                            med.name,
-                            'Efek samping: $value'
-                          );
-                        }
-                      }
                     },
                   ),
                 ],
@@ -617,13 +679,6 @@ class _IsiDataObatPageState extends State<IsiDataObatPage> {
               decoration: BoxDecoration(
                 color: const Color.fromARGB(255, 205, 225, 238),
                 borderRadius: BorderRadius.circular(12),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.grey.withOpacity(0.05),
-                    blurRadius: 4,
-                    offset: const Offset(0, 1),
-                  ),
-                ],
               ),
               child: Column(
                 children: [
@@ -777,13 +832,6 @@ class _IsiDataObatPageState extends State<IsiDataObatPage> {
               decoration: BoxDecoration(
                 color: const Color.fromARGB(255, 205, 225, 238),
                 borderRadius: BorderRadius.circular(12),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.grey.withOpacity(0.05),
-                    blurRadius: 4,
-                    offset: const Offset(0, 1),
-                  ),
-                ],
               ),
               child: Column(
                 children: [
@@ -956,7 +1004,7 @@ class _IsiDataObatPageState extends State<IsiDataObatPage> {
   }
 }
 
-// Widget untuk border putus-putus
+// Widget untuk border putus-putus (sama seperti sebelumnya)
 class DashedBorderContainer extends StatelessWidget {
   final Widget child;
   final double radius;

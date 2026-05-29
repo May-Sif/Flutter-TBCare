@@ -18,8 +18,9 @@ class DatabaseHelper {
     String path = join(await getDatabasesPath(), 'tbcare.db');
     return await openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: _onCreate,
+      onUpgrade: _onUpgrade,
     );
   }
 
@@ -75,7 +76,7 @@ class DatabaseHelper {
       )
     ''');
 
-    // Tabel efek_samping
+    // Tabel efek_samping (LAMA - untuk kompatibilitas)
     await db.execute('''
       CREATE TABLE efek_samping (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -100,7 +101,7 @@ class DatabaseHelper {
       )
     ''');
 
-    // // Tabel riwayat perubahan obat
+    // Tabel riwayat perubahan obat
     await db.execute('''
       CREATE TABLE riwayat_perubahan_obat (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -112,6 +113,103 @@ class DatabaseHelper {
         FOREIGN KEY (user_id) REFERENCES user (id) ON DELETE CASCADE
       )
     ''');
+
+    // Tabel screening_mingguan
+    await db.execute('''
+      CREATE TABLE screening_mingguan (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        tanggal_screening TEXT NOT NULL,
+        minggu_ke INTEGER NOT NULL,
+        skor INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        kesimpulan_hasil TEXT NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES user (id) ON DELETE CASCADE
+      )
+    ''');
+
+    // ========== TABEL BARU UNTUK EFEK SAMPING DENGAN SKOR ==========
+    
+    // Tabel list_efek_samping (master data efek samping)
+    await db.execute('''
+      CREATE TABLE list_efek_samping (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        nama_efek_samping TEXT NOT NULL,
+        skor_default INTEGER NOT NULL
+      )
+    ''');
+
+    // Insert data efek samping default
+    await db.insert('list_efek_samping', {'nama_efek_samping': 'Mual / Muntah', 'skor_default': 1});
+    await db.insert('list_efek_samping', {'nama_efek_samping': 'Gatal / Ruam kulit', 'skor_default': 1});
+    await db.insert('list_efek_samping', {'nama_efek_samping': 'Pusing / Sakit kepala', 'skor_default': 1});
+    await db.insert('list_efek_samping', {'nama_efek_samping': 'Nyeri sendi', 'skor_default': 1});
+    await db.insert('list_efek_samping', {'nama_efek_samping': 'Kurang nafsu makan', 'skor_default': 1});
+    await db.insert('list_efek_samping', {'nama_efek_samping': 'Demam (tanpa sebab jelas)', 'skor_default': 2});
+    await db.insert('list_efek_samping', {'nama_efek_samping': 'Urine berwarna gelap', 'skor_default': 2});
+    await db.insert('list_efek_samping', {'nama_efek_samping': 'Kuning (kulit/mata menguning)', 'skor_default': 3});
+    await db.insert('list_efek_samping', {'nama_efek_samping': 'Gangguan penglihatan', 'skor_default': 3});
+    await db.insert('list_efek_samping', {'nama_efek_samping': 'Dahak berdarah', 'skor_default': 3});
+    await db.insert('list_efek_samping', {'nama_efek_samping': 'Kejang-kejang', 'skor_default': 3});
+    await db.insert('list_efek_samping', {'nama_efek_samping': 'Perdarahan (gusi/mimisan/memar)', 'skor_default': 3});
+
+    // Tabel efek_samping_pasien (menyimpan efek samping yang dipilih pasien)
+    await db.execute('''
+      CREATE TABLE efek_samping_pasien (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        tanggal TEXT NOT NULL,
+        efek_samping_id INTEGER NOT NULL,
+        skor INTEGER NOT NULL,
+        keterangan TEXT,
+        FOREIGN KEY (user_id) REFERENCES user (id) ON DELETE CASCADE,
+        FOREIGN KEY (efek_samping_id) REFERENCES list_efek_samping (id) ON DELETE CASCADE
+      )
+    ''');
+  }
+
+  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      // Tambahkan tabel list_efek_samping
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS list_efek_samping (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          nama_efek_samping TEXT NOT NULL,
+          skor_default INTEGER NOT NULL
+        )
+      ''');
+      
+      // Insert data efek samping default (hanya jika tabel kosong)
+      final List<Map<String, dynamic>> existing = await db.query('list_efek_samping');
+      if (existing.isEmpty) {
+        await db.insert('list_efek_samping', {'nama_efek_samping': 'Mual / Muntah', 'skor_default': 1});
+        await db.insert('list_efek_samping', {'nama_efek_samping': 'Gatal / Ruam kulit', 'skor_default': 1});
+        await db.insert('list_efek_samping', {'nama_efek_samping': 'Pusing / Sakit kepala', 'skor_default': 1});
+        await db.insert('list_efek_samping', {'nama_efek_samping': 'Nyeri sendi', 'skor_default': 1});
+        await db.insert('list_efek_samping', {'nama_efek_samping': 'Kurang nafsu makan', 'skor_default': 1});
+        await db.insert('list_efek_samping', {'nama_efek_samping': 'Demam (tanpa sebab jelas)', 'skor_default': 2});
+        await db.insert('list_efek_samping', {'nama_efek_samping': 'Urine berwarna gelap', 'skor_default': 2});
+        await db.insert('list_efek_samping', {'nama_efek_samping': 'Kuning (kulit/mata menguning)', 'skor_default': 3});
+        await db.insert('list_efek_samping', {'nama_efek_samping': 'Gangguan penglihatan', 'skor_default': 3});
+        await db.insert('list_efek_samping', {'nama_efek_samping': 'Dahak berdarah', 'skor_default': 3});
+        await db.insert('list_efek_samping', {'nama_efek_samping': 'Kejang-kejang', 'skor_default': 3});
+        await db.insert('list_efek_samping', {'nama_efek_samping': 'Perdarahan (gusi/mimisan/memar)', 'skor_default': 3});
+      }
+      
+      // Tambahkan tabel efek_samping_pasien
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS efek_samping_pasien (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          tanggal TEXT NOT NULL,
+          efek_samping_id INTEGER NOT NULL,
+          skor INTEGER NOT NULL,
+          keterangan TEXT,
+          FOREIGN KEY (user_id) REFERENCES user (id) ON DELETE CASCADE,
+          FOREIGN KEY (efek_samping_id) REFERENCES list_efek_samping (id) ON DELETE CASCADE
+        )
+      ''');
+    }
   }
 
   // ========== USER ==========
@@ -189,7 +287,6 @@ class DatabaseHelper {
   Future<int> updateKepatuhan(int userId, String tanggal, int status) async {
     Database db = await database;
     
-    // Cek apakah sudah ada
     List<Map<String, dynamic>> existing = await db.query(
       'kepatuhan',
       where: 'user_id = ? AND tanggal = ?',
@@ -197,7 +294,6 @@ class DatabaseHelper {
     );
     
     if (existing.isNotEmpty) {
-      // Update
       return await db.update(
         'kepatuhan',
         {'status': status},
@@ -205,7 +301,6 @@ class DatabaseHelper {
         whereArgs: [existing.first['id']],
       );
     } else {
-      // Insert baru
       return await db.insert('kepatuhan', {
         'user_id': userId,
         'tanggal': tanggal,
@@ -233,7 +328,6 @@ class DatabaseHelper {
     Database db = await database;
     
     try {
-      // 1. Cek user berdasarkan email
       String userEmail = email ?? dataDiri['nama'].toLowerCase().replaceAll(' ', '.') + '@tbcare.com';
       Map<String, dynamic>? existingUser = await getUserByEmail(userEmail);
       
@@ -241,7 +335,6 @@ class DatabaseHelper {
       
       if (existingUser != null) {
         userId = existingUser['id'];
-        // Update user
         await updateUser(userId, {
           'nama': dataDiri['nama'],
           'umur': int.parse(dataDiri['umur']),
@@ -252,7 +345,6 @@ class DatabaseHelper {
           'masa_pengobatan': dataDiri['masaPengobatan'],
         });
       } else {
-        // Insert user baru
         userId = await insertUser({
           'email': userEmail,
           'password': 'default123',
@@ -266,7 +358,6 @@ class DatabaseHelper {
         });
       }
       
-      // 2. Hapus jadwal lama jika ada
       int? jadwalId = await getJadwalIdByUserId(userId);
       if (jadwalId != null) {
         await deleteSesiByJadwalId(jadwalId);
@@ -274,7 +365,6 @@ class DatabaseHelper {
         jadwalId = await insertJadwal(userId);
       }
       
-      // 3. Insert sesi baru
       for (var obat in jadwalObat) {
         await insertSesi({
           'jadwal_id': jadwalId,
@@ -314,11 +404,9 @@ class DatabaseHelper {
     _currentUserId = null;
   }
 
-  // Untuk mengambil data lengkap user
   Future<Map<String, dynamic>> getCompleteUserData(int userId) async {
     Database db = await database;
     
-    // Ambil user
     List<Map<String, dynamic>> userResult = await db.query(
       'user',
       where: 'id = ?',
@@ -329,7 +417,6 @@ class DatabaseHelper {
     
     final user = userResult.first;
     
-    // Ambil jadwal
     int? jadwalId = await getJadwalIdByUserId(userId);
     
     List<Map<String, dynamic>> jadwalObat = [];
@@ -364,7 +451,6 @@ class DatabaseHelper {
     };
   }
 
-  // Untuk mengambil email user
   Future<String?> getUserEmail(int userId) async {
     Database db = await database;
     List<Map<String, dynamic>> result = await db.query(
@@ -400,20 +486,16 @@ class DatabaseHelper {
     return result.isNotEmpty ? result.first : null;
   }
 
-  // ========== EFEK SAMPING ==========
-
-  // Simpan efek samping hari ini
+  // ========== EFEK SAMPING (LAMA) ==========
   Future<void> saveEfekSamping(int userId, String tanggal, List<String> efekList) async {
     Database db = await database;
     
-    // Hapus efek samping lama untuk tanggal ini
     await db.delete(
       'efek_samping',
       where: 'user_id = ? AND tanggal = ?',
       whereArgs: [userId, tanggal],
     );
     
-    // Insert efek samping baru
     for (var efek in efekList) {
       await db.insert('efek_samping', {
         'user_id': userId,
@@ -423,7 +505,20 @@ class DatabaseHelper {
     }
   }
 
-  // Ambil efek samping berdasarkan tanggal
+  // Tambahkan method ini di DatabaseHelper class
+  Future<List<Map<String, dynamic>>> getLatestEfekSampingByUserId(int userId, {int limit = 5}) async {
+    Database db = await database;
+    
+    return await db.rawQuery('''
+      SELECT esp.*, les.nama_efek_samping 
+      FROM efek_samping_pasien esp
+      JOIN list_efek_samping les ON esp.efek_samping_id = les.id
+      WHERE esp.user_id = ?
+      ORDER BY esp.tanggal DESC, esp.skor DESC
+      LIMIT ?
+    ''', [userId, limit]);
+  }
+
   Future<List<String>> getEfekSampingByDate(int userId, String tanggal) async {
     Database db = await database;
     final result = await db.query(
@@ -434,7 +529,6 @@ class DatabaseHelper {
     return result.map((e) => e['efek'] as String).toList();
   }
 
-  // Ambil semua efek samping dalam bulan tertentu
   Future<Map<String, List<String>>> getEfekSampingByMonth(int userId, int tahun, int bulan) async {
     Database db = await database;
     final bulanStr = '$tahun-${bulan.toString().padLeft(2, '0')}';
@@ -457,9 +551,131 @@ class DatabaseHelper {
     return map;
   }
 
-  // ========== SESI KEPATUHAN ==========
+  // ========== EFEK SAMPING DENGAN SKOR (BARU) ==========
 
-  // Update status kepatuhan per sesi
+  // Ambil semua daftar efek samping yang tersedia
+  Future<List<Map<String, dynamic>>> getAllListEfekSamping() async {
+    Database db = await database;
+    return await db.query('list_efek_samping', orderBy: 'id');
+  }
+
+  // Simpan efek samping pasien dengan skor
+  Future<int> saveEfekSampingPasien(int userId, DateTime tanggal, int efekSampingId, int skor, String? keterangan) async {
+    Database db = await database;
+    final dateStr = '${tanggal.year}-${tanggal.month.toString().padLeft(2, '0')}-${tanggal.day.toString().padLeft(2, '0')}';
+    
+    return await db.insert('efek_samping_pasien', {
+      'user_id': userId,
+      'tanggal': dateStr,
+      'efek_samping_id': efekSampingId,
+      'skor': skor,
+      'keterangan': keterangan,
+    });
+  }
+
+  // Simpan multiple efek samping sekaligus
+  Future<void> saveMultipleEfekSampingPasien(int userId, DateTime tanggal, List<Map<String, dynamic>> efekList) async {
+    Database db = await database;
+    final dateStr = '${tanggal.year}-${tanggal.month.toString().padLeft(2, '0')}-${tanggal.day.toString().padLeft(2, '0')}';
+    
+    await db.delete(
+      'efek_samping_pasien',
+      where: 'user_id = ? AND tanggal = ?',
+      whereArgs: [userId, dateStr],
+    );
+    
+    for (var efek in efekList) {
+      await db.insert('efek_samping_pasien', {
+        'user_id': userId,
+        'tanggal': dateStr,
+        'efek_samping_id': efek['efek_samping_id'],
+        'skor': efek['skor'],
+        'keterangan': efek['keterangan'],
+      });
+    }
+  }
+
+  // Ambil efek samping pasien berdasarkan tanggal
+  Future<List<Map<String, dynamic>>> getEfekSampingPasienByDate(int userId, DateTime tanggal) async {
+    Database db = await database;
+    final dateStr = '${tanggal.year}-${tanggal.month.toString().padLeft(2, '0')}-${tanggal.day.toString().padLeft(2, '0')}';
+    
+    return await db.rawQuery('''
+      SELECT esp.*, les.nama_efek_samping 
+      FROM efek_samping_pasien esp
+      JOIN list_efek_samping les ON esp.efek_samping_id = les.id
+      WHERE esp.user_id = ? AND esp.tanggal = ?
+      ORDER BY esp.skor DESC
+    ''', [userId, dateStr]);
+  }
+
+  // Ambil semua efek samping pasien dalam bulan tertentu (LENGKAP dengan nama efek)
+  Future<Map<String, List<Map<String, dynamic>>>> getEfekSampingPasienByMonth(int userId, int tahun, int bulan) async {
+    Database db = await database;
+    final bulanStr = '$tahun-${bulan.toString().padLeft(2, '0')}';
+    
+    final result = await db.rawQuery('''
+      SELECT esp.*, les.nama_efek_samping 
+      FROM efek_samping_pasien esp
+      JOIN list_efek_samping les ON esp.efek_samping_id = les.id
+      WHERE esp.user_id = ? AND esp.tanggal LIKE ?
+      ORDER BY esp.tanggal DESC, esp.skor DESC
+    ''', [userId, '$bulanStr%']);
+    
+    final Map<String, List<Map<String, dynamic>>> map = {};
+    for (var row in result) {
+      final tanggal = row['tanggal'] as String;
+      if (!map.containsKey(tanggal)) {
+        map[tanggal] = [];
+      }
+      map[tanggal]!.add(row);
+    }
+    return map;
+  }
+
+  // Hapus efek samping pasien pada tanggal tertentu
+  Future<int> deleteEfekSampingPasienByDate(int userId, DateTime tanggal) async {
+    Database db = await database;
+    final dateStr = '${tanggal.year}-${tanggal.month.toString().padLeft(2, '0')}-${tanggal.day.toString().padLeft(2, '0')}';
+    
+    return await db.delete(
+      'efek_samping_pasien',
+      where: 'user_id = ? AND tanggal = ?',
+      whereArgs: [userId, dateStr],
+    );
+  }
+
+  // Hitung total skor efek samping pada bulan tertentu
+  Future<int> getTotalSkorEfekSampingByMonth(int userId, int tahun, int bulan) async {
+    Database db = await database;
+    final bulanStr = '$tahun-${bulan.toString().padLeft(2, '0')}';
+    
+    final result = await db.rawQuery('''
+      SELECT SUM(skor) as total_skor
+      FROM efek_samping_pasien
+      WHERE user_id = ? AND tanggal LIKE ?
+    ''', [userId, '$bulanStr%']);
+    
+    return (result.first['total_skor'] as int? ?? 0);
+  }
+
+  // Ambil efek samping dengan skor tertinggi pada bulan tertentu
+  Future<List<Map<String, dynamic>>> getEfekSampingTertinggiByMonth(int userId, int tahun, int bulan) async {
+    Database db = await database;
+    final bulanStr = '$tahun-${bulan.toString().padLeft(2, '0')}';
+    
+    return await db.rawQuery('''
+      SELECT les.nama_efek_samping, esp.skor, COUNT(*) as jumlah
+      FROM efek_samping_pasien esp
+      JOIN list_efek_samping les ON esp.efek_samping_id = les.id
+      WHERE esp.user_id = ? AND esp.tanggal LIKE ?
+      GROUP BY esp.efek_samping_id
+      ORDER BY esp.skor DESC
+      LIMIT 5
+    ''', [userId, '$bulanStr%']);
+  }
+
+  // ========== SESI KEPATUHAN ==========
   Future<void> updateSesiKepatuhan(int userId, String tanggal, int sesiIndex, int status) async {
     Database db = await database;
     
@@ -486,7 +702,6 @@ class DatabaseHelper {
     }
   }
 
-  // Ambil status semua sesi untuk tanggal tertentu
   Future<Map<int, int>> getSesiKepatuhanByDate(int userId, String tanggal) async {
     Database db = await database;
     final result = await db.query(
@@ -502,7 +717,7 @@ class DatabaseHelper {
     return map;
   }
 
-  // Menyimpan riwayat perubahan obat
+  // ========== RIWAYAT PERUBAHAN OBAT ==========
   Future<int> insertRiwayatPerubahanObat({
     required int userId,
     required String tanggal,
@@ -520,7 +735,6 @@ class DatabaseHelper {
     });
   }
 
-  // Mengambil semua riwayat perubahan obat untuk user
   Future<List<Map<String, dynamic>>> getRiwayatPerubahanObat(int userId) async {
     Database db = await database;
     return await db.query(
@@ -531,7 +745,6 @@ class DatabaseHelper {
     );
   }
 
-  // Mengambil riwayat perubahan obat berdasarkan bulan
   Future<List<Map<String, dynamic>>> getRiwayatPerubahanObatByMonth(
     int userId, 
     int tahun, 
@@ -544,6 +757,116 @@ class DatabaseHelper {
       where: 'user_id = ? AND tanggal LIKE ?',
       whereArgs: [userId, '$bulanStr%'],
       orderBy: 'tanggal DESC',
+    );
+  }
+
+  // ========== SCREENING MINGGUAN ==========
+  Future<int> insertScreeningMingguan(Map<String, dynamic> screening) async {
+    Database db = await database;
+    return await db.insert('screening_mingguan', screening);
+  }
+
+  Future<List<Map<String, dynamic>>> getScreeningMingguanByUserId(int userId) async {
+    Database db = await database;
+    return await db.query(
+      'screening_mingguan',
+      where: 'user_id = ?',
+      whereArgs: [userId],
+      orderBy: 'minggu_ke DESC',
+    );
+  }
+
+  Future<Map<String, dynamic>?> getLatestScreening(int userId) async {
+    Database db = await database;
+    List<Map<String, dynamic>> result = await db.query(
+      'screening_mingguan',
+      where: 'user_id = ?',
+      whereArgs: [userId],
+      orderBy: 'tanggal_screening DESC',
+      limit: 1,
+    );
+    return result.isNotEmpty ? result.first : null;
+  }
+
+  // ========== KEPATUHAN HARIAN (CEK SEMUA SESI) ==========
+  Future<bool> isAllSesiObatDiminum(int userId, DateTime date) async {
+    Database db = await database;
+    final dateStr = '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+    
+    final jadwalId = await getJadwalIdByUserId(userId);
+    if (jadwalId == null) return false;
+    
+    final sesiList = await getSesiByJadwalId(jadwalId);
+    final totalSesi = sesiList.length;
+    
+    if (totalSesi == 0) return false;
+    
+    final result = await db.query(
+      'sesi_kepatuhan',
+      where: 'user_id = ? AND tanggal = ? AND status = 1',
+      whereArgs: [userId, dateStr],
+    );
+    
+    return result.length == totalSesi;
+  }
+
+  Future<int> getJumlahSesiDiminum(int userId, DateTime date) async {
+    Database db = await database;
+    final dateStr = '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+    
+    final result = await db.query(
+      'sesi_kepatuhan',
+      where: 'user_id = ? AND tanggal = ? AND status = 1',
+      whereArgs: [userId, dateStr],
+    );
+    
+    return result.length;
+  }
+
+  Future<int> getTotalSesiObat(int userId) async {
+    final jadwalId = await getJadwalIdByUserId(userId);
+    if (jadwalId == null) return 0;
+    
+    final sesiList = await getSesiByJadwalId(jadwalId);
+    return sesiList.length;
+  }
+
+  // Reset semua data kepatuhan dan efek samping user
+  Future<void> resetUserProgress(int userId) async {
+    Database db = await database;
+    
+    // Hapus semua data kepatuhan (sesi_kepatuhan)
+    await db.delete(
+      'sesi_kepatuhan',
+      where: 'user_id = ?',
+      whereArgs: [userId],
+    );
+    
+    // Hapus semua data kepatuhan harian (kepatuhan)
+    await db.delete(
+      'kepatuhan',
+      where: 'user_id = ?',
+      whereArgs: [userId],
+    );
+    
+    // Hapus semua data efek samping pasien
+    await db.delete(
+      'efek_samping_pasien',
+      where: 'user_id = ?',
+      whereArgs: [userId],
+    );
+    
+    // Hapus semua data screening mingguan
+    await db.delete(
+      'screening_mingguan',
+      where: 'user_id = ?',
+      whereArgs: [userId],
+    );
+
+    await db.delete(
+      'riwayat_perubahan_obat',
+      where: 'user_id = ?',
+      whereArgs: [userId],
     );
   }
 }

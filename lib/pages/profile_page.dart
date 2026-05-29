@@ -645,56 +645,178 @@ class _ProfilPageState extends State<ProfilPage> {
   Widget _buildInfoRow(String label, String value) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 4),
-      child: Text(
-        '$label $value',
-        style: const TextStyle(
-          fontSize: 15,
-          height: 1.4,
-          color: AppColors.textSecondary,
-        ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 120, // lebar tetap untuk label
+            child: Text(
+              label,
+              style: const TextStyle(
+                fontSize: 15,
+                height: 1.4,
+                color: AppColors.textSecondary,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(
+                fontSize: 15,
+                height: 1.4,
+                color: AppColors.textSecondary,
+              ),
+              softWrap: true,
+            ),
+          ),
+        ],
       ),
     );
-  }
+    }
 
   void _showResetConfirmationDialog(BuildContext context) {
     showDialog(
       context: context,
       builder: (_) {
-        return AlertDialog(
-          title: const Text('Reset Track Pengobatan'),
-          content: const Text(
-            'Apakah Anda yakin ingin mereset seluruh riwayat pengobatan?',
-          ),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.pop(context);
-              },
-              child: const Text('Batal'),
+        return Dialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          child: Container(
+            width: MediaQuery.of(context).size.width * 0.85, // 85% dari lebar layar
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Row(
+                  children: [
+                    Icon(Icons.warning_amber_rounded, color: Colors.red, size: 28),
+                    SizedBox(width: 10),
+                    Text(
+                      'Reset Track',
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'Data yang akan dihapus:',
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  '• Riwayat kepatuhan minum obat\n'
+                  '• Riwayat efek samping\n'
+                  '• Riwayat screening mingguan',
+                  style: TextStyle(fontSize: 13, color: Colors.grey),
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Text(
+                    '⚠️ Data profil dan jadwal obat akan tetap tersimpan',
+                    style: TextStyle(fontSize: 12, color: Colors.orange),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'Tindakan ini tidak dapat dibatalkan!',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Colors.red),
+                ),
+                const SizedBox(height: 20),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('Batal'),
+                    ),
+                    const SizedBox(width: 8),
+                    ElevatedButton(
+                      onPressed: () async {
+                        Navigator.pop(context);
+                        await _resetProgress();
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red,
+                        foregroundColor: Colors.white,
+                      ),
+                      child: const Text('Ya, Reset'),
+                    ),
+                  ],
+                ),
+              ],
             ),
-            ElevatedButton(
-              onPressed: () async {
-                Navigator.pop(context);
-                // TODO: Implement reset track
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Fitur reset track akan segera hadir')),
-                );
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
-              ),
-              child: const Text(
-                'Reset',
-                style: TextStyle(color: Colors.white),
-              ),
-            ),
-          ],
+          ),
         );
       },
     );
+  }
+
+  // Method untuk melakukan reset progress
+  Future<void> _resetProgress() async {
+    // Tampilkan loading
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(
+        child: Card(
+          child: Padding(
+            padding: EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(height: 12),
+                Text('Meriset data...'),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    try {
+      final dbHelper = DatabaseHelper();
+      int? userId = widget.userId ?? dbHelper.getCurrentUserId();
+
+      if (userId != null) {
+        await dbHelper.resetUserProgress(userId);
+
+        if (mounted) {
+          Navigator.pop(context); // tutup loading
+
+          // Tampilkan sukses
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('✅ Progress berhasil direset!'),
+              backgroundColor: Colors.green,
+              behavior: SnackBarBehavior.floating,
+              duration: Duration(seconds: 2),
+            ),
+          );
+
+          // Refresh halaman profile (optional)
+          setState(() {});
+        }
+      } else {
+        throw Exception('User ID tidak ditemukan');
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.pop(context); // tutup loading
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ Gagal reset: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
   void _showLogoutConfirmationDialog(BuildContext context) {

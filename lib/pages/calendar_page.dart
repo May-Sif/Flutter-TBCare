@@ -10,8 +10,6 @@ import '../pages/riwayat_kesehatan_page.dart';
 import '../pages/profile_page.dart';
 import '../pages/home_page.dart';
 
-final RouteObserver<ModalRoute<void>> routeObserver = RouteObserver<ModalRoute<void>>();
-
 class CalendarPage extends StatefulWidget {
   const CalendarPage({super.key});
 
@@ -19,7 +17,7 @@ class CalendarPage extends StatefulWidget {
   State<CalendarPage> createState() => _CalendarPageState();
 }
 
-class _CalendarPageState extends State<CalendarPage> with RouteAware {
+class _CalendarPageState extends State<CalendarPage> {
   int _navIndex = 1; 
   DateTime _focusedMonth = DateTime.now();
   DateTime _selectedDate = DateTime.now();
@@ -27,12 +25,25 @@ class _CalendarPageState extends State<CalendarPage> with RouteAware {
   final DatabaseHelper _db = DatabaseHelper();
   int? _userId;
 
-  final List<String> _semuaEfek = [
-    'muntah', 'demam', 'pusing', 'urine gelap',
-    'nyeri sendi', 'kejang', 'mimisan',
+  // Daftar efek samping dengan skor BAWAAN (skor sudah ditentukan, tidak bisa dipilih user)
+  final List<Map<String, dynamic>> _daftarEfekSamping = [
+    {'id': 1, 'nama': 'Mual / Muntah', 'skor': 1},
+    {'id': 2, 'nama': 'Gatal / Ruam kulit', 'skor': 1},
+    {'id': 3, 'nama': 'Pusing / Sakit kepala', 'skor': 1},
+    {'id': 4, 'nama': 'Nyeri sendi', 'skor': 1},
+    {'id': 5, 'nama': 'Kurang nafsu makan', 'skor': 1},
+    {'id': 6, 'nama': 'Demam (tanpa sebab jelas)', 'skor': 2},
+    {'id': 7, 'nama': 'Urine berwarna gelap', 'skor': 2},
+    {'id': 8, 'nama': 'Kuning (kulit/mata menguning)', 'skor': 3},
+    {'id': 9, 'nama': 'Gangguan penglihatan', 'skor': 3},
+    {'id': 10, 'nama': 'Dahak berdarah', 'skor': 3},
+    {'id': 11, 'nama': 'Kejang-kejang', 'skor': 3},
+    {'id': 12, 'nama': 'Perdarahan (gusi/mimisan/memar)', 'skor': 3},
   ];
-  final Set<String> _efekDipilih = {};
-
+  
+  // Set untuk menyimpan ID efek samping yang dipilih (tanpa skor, karena skor sudah ditentukan)
+  Set<int> _efekDipilihIds = {};
+  
   final Map<int, bool> _sesiStatus = {};
 
   @override
@@ -46,28 +57,10 @@ class _CalendarPageState extends State<CalendarPage> with RouteAware {
     });
   }
 
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    routeObserver.subscribe(this, ModalRoute.of(context)!);
-  }
-
-  @override
-  void dispose() {
-    routeObserver.unsubscribe(this);
-    super.dispose();
-  }
-
-  @override
-  void didPopNext() {
-    _loadSesiStatus();
-    _loadKepatuhanBulan();
-  }
-
   Future<void> _loadSesiStatus() async {
     if (_userId == null) return;
-    final today =
-        '${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}-${DateTime.now().day.toString().padLeft(2, '0')}';
+    final today = DateTime.now();
+    final todayStr = '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
     final db = await _db.database;
     final jadwal = context.read<HomeProvider>().jadwalObat;
     final newStatus = <int, bool>{};
@@ -75,7 +68,7 @@ class _CalendarPageState extends State<CalendarPage> with RouteAware {
       final rows = await db.query(
         'sesi_kepatuhan',
         where: 'user_id = ? AND tanggal = ? AND sesi_index = ?',
-        whereArgs: [_userId, today, i],
+        whereArgs: [_userId, todayStr, i],
       );
       newStatus[i] = rows.isNotEmpty && (rows.first['status'] as int? ?? 0) == 1;
     }
@@ -88,8 +81,7 @@ class _CalendarPageState extends State<CalendarPage> with RouteAware {
   Future<void> _loadKepatuhanBulan() async {
     if (_userId == null) return;
     final db = await _db.database;
-    final bulanStr =
-        '${_focusedMonth.year}-${_focusedMonth.month.toString().padLeft(2, '0')}';
+    final bulanStr = '${_focusedMonth.year}-${_focusedMonth.month.toString().padLeft(2, '0')}';
     final rows = await db.query(
       'kepatuhan',
       where: 'user_id = ? AND tanggal LIKE ?',
@@ -105,7 +97,6 @@ class _CalendarPageState extends State<CalendarPage> with RouteAware {
   void _onNavBarTap(int index) {
     if (index == _navIndex) return;
     
-    // Index 0: Beranda → HomeScreen
     if (index == 0) {
       Navigator.pushReplacement(
         context,
@@ -120,7 +111,6 @@ class _CalendarPageState extends State<CalendarPage> with RouteAware {
       return;
     }
     
-    // Index 2: Statistik → RiwayatKesehatanPage
     if (index == 2) {
       Navigator.pushReplacement(
         context,
@@ -131,7 +121,6 @@ class _CalendarPageState extends State<CalendarPage> with RouteAware {
       return;
     }
     
-    // Index 3: Profil → ProfilPage
     if (index == 3) {
       Navigator.pushReplacement(
         context,
@@ -142,7 +131,6 @@ class _CalendarPageState extends State<CalendarPage> with RouteAware {
       return;
     }
     
-    // Index 1: Tetap di halaman ini
     setState(() => _navIndex = index);
   }
   
@@ -203,8 +191,7 @@ class _CalendarPageState extends State<CalendarPage> with RouteAware {
     ];
 
     final firstDay = DateTime(_focusedMonth.year, _focusedMonth.month, 1);
-    final daysInMonth =
-        DateUtils.getDaysInMonth(_focusedMonth.year, _focusedMonth.month);
+    final daysInMonth = DateUtils.getDaysInMonth(_focusedMonth.year, _focusedMonth.month);
     final startOffset = firstDay.weekday - 1;
 
     return Container(
@@ -318,8 +305,7 @@ class _CalendarPageState extends State<CalendarPage> with RouteAware {
   }
 
   Widget _tanggalCell(int day) {
-    final tanggalStr =
-        '${_focusedMonth.year}-${_focusedMonth.month.toString().padLeft(2, '0')}-${day.toString().padLeft(2, '0')}';
+    final tanggalStr = '${_focusedMonth.year}-${_focusedMonth.month.toString().padLeft(2, '0')}-${day.toString().padLeft(2, '0')}';
     final status = _kepatuhanBulan[tanggalStr];
     final isTeratur = status == 1;
     final tanggalIni = DateTime(_focusedMonth.year, _focusedMonth.month, day);
@@ -367,7 +353,6 @@ class _CalendarPageState extends State<CalendarPage> with RouteAware {
       ),
     );
   }
-
 
   Widget _buildObatHariIni(HomeProvider provider) {
     final jadwal = provider.jadwalObat;
@@ -505,6 +490,7 @@ class _CalendarPageState extends State<CalendarPage> with RouteAware {
     );
   }
 
+  // ========== EFEK SAMPING (TANPA DIALOG SKOR) ==========
   Widget _buildEfekSamping() {
     return Container(
       width: double.infinity,
@@ -522,32 +508,23 @@ class _CalendarPageState extends State<CalendarPage> with RouteAware {
                   fontWeight: FontWeight.bold,
                   color: AppColors.textPrimary)),
           const SizedBox(height: 12),
+          Text(
+            'Pilih efek samping yang dirasakan hari ini:',
+            style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+          ),
+          const SizedBox(height: 8),
           Wrap(
             spacing: 8,
             runSpacing: 8,
             children: [
-              ..._semuaEfek.map((e) => _chipEfek(e)),
-              GestureDetector(
-                onTap: _showTambahEfekDialog,
-                child: Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color: AppColors.surface,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: AppColors.divider),
-                  ),
-                  child: const Icon(Icons.add,
-                      size: 20, color: AppColors.textSecondary),
-                ),
-              ),
+              ..._daftarEfekSamping.map((efek) => _chipEfek(efek)),
             ],
           ),
           const SizedBox(height: 16),
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
-              onPressed: _simpanLaporan,
+              onPressed: _simpanLaporanEfekSamping,
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primaryDark,
                 foregroundColor: Colors.white,
@@ -584,38 +561,47 @@ class _CalendarPageState extends State<CalendarPage> with RouteAware {
     );
   }
 
-  Widget _chipEfek(String efek) {
-    final dipilih = _efekDipilih.contains(efek);
+  // Chip efek samping - TANPA dialog pilihan skor (skor sudah ditentukan)
+  Widget _chipEfek(Map<String, dynamic> efek) {
+    final int id = efek['id'];
+    final String nama = efek['nama'];
+    final bool dipilih = _efekDipilihIds.contains(id);
+    
     return GestureDetector(
-      onTap: () => setState(() =>
-          dipilih ? _efekDipilih.remove(efek) : _efekDipilih.add(efek)),
+      onTap: () {
+        setState(() {
+          if (dipilih) {
+            _efekDipilihIds.remove(id);
+          } else {
+            _efekDipilihIds.add(id);
+          }
+        });
+      },
       child: Container(
-        padding:
-            const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
         decoration: BoxDecoration(
           color: dipilih ? AppColors.textPrimary : AppColors.surface,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-              color:
-                  dipilih ? AppColors.textPrimary : AppColors.divider),
+            color: dipilih ? AppColors.textPrimary : AppColors.divider,
+          ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(efek,
-                style: TextStyle(
-                    fontSize: 12,
-                    color: dipilih
-                        ? Colors.white
-                        : AppColors.textPrimary,
-                    fontWeight: FontWeight.w500)),
+            Text(
+              nama,
+              style: TextStyle(
+                fontSize: 12,
+                color: dipilih ? Colors.white : AppColors.textPrimary,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
             if (dipilih) ...[
               const SizedBox(width: 4),
               GestureDetector(
-                onTap: () =>
-                    setState(() => _efekDipilih.remove(efek)),
-                child: const Icon(Icons.close,
-                    size: 14, color: Colors.white),
+                onTap: () => setState(() => _efekDipilihIds.remove(id)),
+                child: const Icon(Icons.close, size: 14, color: Colors.white),
               ),
             ],
           ],
@@ -624,16 +610,39 @@ class _CalendarPageState extends State<CalendarPage> with RouteAware {
     );
   }
 
-  void _simpanLaporan() async{
-    final gejalaList = _efekDipilih.toList();
+  Future<void> _simpanLaporanEfekSamping() async {
+    if (_efekDipilihIds.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Pilih minimal satu efek samping')),
+      );
+      return;
+    }
+
     final dbHelper = DatabaseHelper();
     int? userId = _db.getCurrentUserId();
     
     if (userId != null) {
-      final tanggal = DateTime.now().toIso8601String().split('T').first;
-      await dbHelper.saveEfekSamping(userId, tanggal, gejalaList);
+      final today = DateTime.now();
+      
+      // Simpan efek samping dengan skor BAWAAN (tidak perlu user pilih)
+      for (var efekId in _efekDipilihIds) {
+        // Cari efek samping berdasarkan ID untuk mendapatkan skor
+        final efek = _daftarEfekSamping.firstWhere((e) => e['id'] == efekId);
+        final skor = efek['skor'] as int;
+        
+        await dbHelper.saveEfekSampingPasien(
+          userId, 
+          today, 
+          efekId, 
+          skor, 
+          null // keterangan opsional
+        );
+      }
     }
 
+    // Tampilkan dialog sukses
+    final efekTerpilih = _daftarEfekSamping.where((e) => _efekDipilihIds.contains(e['id'])).toList();
+    
     showDialog(
       context: context,
       builder: (_) => Dialog(
@@ -646,7 +655,7 @@ class _CalendarPageState extends State<CalendarPage> with RouteAware {
             mainAxisSize: MainAxisSize.min,
             children: [
               const Text(
-                'Skrining harian berhasil disimpan!',
+                'Laporan Efek Samping Berhasil Disimpan!',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                     fontSize: 17,
@@ -656,11 +665,11 @@ class _CalendarPageState extends State<CalendarPage> with RouteAware {
               const SizedBox(height: 8),
               const Divider(),
               const SizedBox(height: 8),
-              if (gejalaList.isNotEmpty) ...[
+              if (efekTerpilih.isNotEmpty) ...[
                 Align(
                   alignment: Alignment.centerLeft,
                   child: Text(
-                    'Gejala yang dicatat:',
+                    'Efek samping yang dicatat:',
                     style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
@@ -668,16 +677,22 @@ class _CalendarPageState extends State<CalendarPage> with RouteAware {
                   ),
                 ),
                 const SizedBox(height: 6),
-                ...gejalaList.map((g) => Padding(
-                  padding: const EdgeInsets.only(bottom: 4),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.circle, size: 6, color: AppColors.primary),
-                      const SizedBox(width: 8),
-                      Text(g, style: const TextStyle(fontSize: 13, color: AppColors.textPrimary)),
-                    ],
-                  ),
-                )),
+                ...efekTerpilih.map((efek) {
+                  final nama = efek['nama'];
+                  final skor = efek['skor'];
+                  final level = skor == 1 ? 'Ringan' : (skor == 2 ? 'Sedang' : 'Berat');
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.circle, size: 6, color: AppColors.primary),
+                        const SizedBox(width: 8),
+                        Text('$nama ($level)', 
+                            style: const TextStyle(fontSize: 13, color: AppColors.textPrimary)),
+                      ],
+                    ),
+                  );
+                }),
                 const SizedBox(height: 12),
               ],
               const Text(
@@ -693,7 +708,7 @@ class _CalendarPageState extends State<CalendarPage> with RouteAware {
                 child: OutlinedButton(
                   onPressed: () {
                     Navigator.pop(context);
-                    setState(() => _efekDipilih.clear());
+                    setState(() => _efekDipilihIds.clear());
                   },
                   style: OutlinedButton.styleFrom(
                     backgroundColor: Colors.white,
@@ -714,11 +729,9 @@ class _CalendarPageState extends State<CalendarPage> with RouteAware {
   }
 
   void _periksaDetail() async {
-    // Ambil userId dari DatabaseHelper
     final dbHelper = DatabaseHelper();
     int? userId = dbHelper.getCurrentUserId();
     
-    // Navigasi ke halaman detail efek samping
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -729,98 +742,8 @@ class _CalendarPageState extends State<CalendarPage> with RouteAware {
         ),
       ),
     ).then((_) {
-      // Ketika kembali dari halaman detail, reload data
       _loadSesiStatus();
       _loadKepatuhanBulan();
     });
-  }
-
-  void _showTambahEfekDialog() {
-    final controller = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (_) => Dialog(
-        backgroundColor: AppColors.cardObat,
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16)),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 24, 20, 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Tambah Efek Samping',
-                style: TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.textPrimary),
-              ),
-              const SizedBox(height: 8),
-              const Divider(),
-              const SizedBox(height: 8),
-              TextField(
-                controller: controller,
-                decoration: InputDecoration(
-                  hintStyle: const TextStyle(color: AppColors.textSecondary, fontSize: 13),
-                  filled: true,
-                  fillColor: Colors.white,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: AppColors.divider),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: AppColors.divider),
-                  ),
-                ),
-                textCapitalization: TextCapitalization.sentences,
-              ),
-              const SizedBox(height: 20),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  OutlinedButton(
-                    onPressed: () => Navigator.pop(context),
-                    style: OutlinedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      foregroundColor: AppColors.textPrimary,
-                      side: const BorderSide(color: AppColors.divider),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(20)),
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-                    ),
-                    child: const Text('Kembali'),
-                  ),
-                  const SizedBox(width: 10),
-                  OutlinedButton(
-                    onPressed: () {
-                      final val = controller.text.trim().toLowerCase();
-                      if (val.isNotEmpty && !_semuaEfek.contains(val)) {
-                        setState(() {
-                          _semuaEfek.add(val);
-                          _efekDipilih.add(val);
-                        });
-                      }
-                      Navigator.pop(context);
-                    },
-                    style: OutlinedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      foregroundColor: AppColors.textPrimary,
-                      side: const BorderSide(color: AppColors.divider),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(20)),
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-                    ),
-                    child: const Text('Tambah'),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
   }
 }

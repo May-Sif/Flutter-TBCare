@@ -4,6 +4,7 @@ import 'package:tbc_app/widgets/app_bottom_nav.dart';
 import 'package:tbc_app/pages/calendar_page.dart';
 import 'package:tbc_app/pages/profile_page.dart';
 import 'package:tbc_app/pages/home_page.dart';
+import 'package:tbc_app/database/database_helper.dart';
 
 class RiwayatKesehatanPage extends StatefulWidget {
   final int? userId;
@@ -15,19 +16,115 @@ class RiwayatKesehatanPage extends StatefulWidget {
 }
 
 class _RiwayatKesehatanPageState extends State<RiwayatKesehatanPage> {
-  int _currentIndex = 2; // Index untuk Statistik
+  int _currentIndex = 2;
+  final DatabaseHelper _dbHelper = DatabaseHelper();
+  
+  Map<String, dynamic> _userData = {};
+  List<Map<String, dynamic>> _screeningHistory = [];
+  int _totalPatuh = 0;
+  int _totalTerlewat = 0;
+  double _kepatuhanPersen = 0;
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadData();
+  }
+
+  Future<void> _loadData() async {
+    setState(() => _isLoading = true);
+    
+    final userId = widget.userId ?? _dbHelper.getCurrentUserId();
+    
+    if (userId != null) {
+      final user = await _dbHelper.getUserById(userId);
+      if (user != null) {
+        setState(() {
+          _userData = user;
+        });
+      }
+      
+      await _loadScreeningHistory(userId);
+      await _calculateKepatuhan(userId);
+    }
+    
+    setState(() => _isLoading = false);
+  }
+
+  Future<void> _loadScreeningHistory(int userId) async {
+    try {
+      final db = await _dbHelper.database;
+      
+      // Cek apakah tabel ada
+      final tables = await db.query('sqlite_master', 
+        where: 'type = ? AND name = ?', 
+        whereArgs: ['table', 'screening_mingguan']
+      );
+      
+      if (tables.isEmpty) {
+        // Buat tabel jika belum ada
+        await db.execute('''
+          CREATE TABLE IF NOT EXISTS screening_mingguan (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            tanggal_screening TEXT NOT NULL,
+            minggu_ke INTEGER NOT NULL,
+            skor INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            kesimpulan_hasil TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES user (id) ON DELETE CASCADE
+          )
+        ''');
+        setState(() {
+          _screeningHistory = [];
+        });
+        return;
+      }
+      
+      final result = await db.query(
+        'screening_mingguan',
+        where: 'user_id = ?',
+        whereArgs: [userId],
+        orderBy: 'minggu_ke DESC',
+        limit: 4,
+      );
+      
+      setState(() {
+        _screeningHistory = result;
+      });
+    } catch (e) {
+      print('Error loading screening history: $e');
+      setState(() {
+        _screeningHistory = [];
+      });
+    }
+  }
+
+  Future<void> _calculateKepatuhan(int userId) async {
+    final now = DateTime.now();
+    final bulanStr = '${now.year}-${now.month.toString().padLeft(2, '0')}';
+    final daysInMonth = DateTime(now.year, now.month + 1, 0).day;
+    
+    final patuh = await _dbHelper.getKepatuhanCount(userId, bulanStr);
+    
+    setState(() {
+      _totalPatuh = patuh;
+      _totalTerlewat = daysInMonth - patuh;
+      _kepatuhanPersen = daysInMonth > 0 ? patuh / daysInMonth : 0;
+    });
+  }
 
   void _onNavBarTap(int index) {
     if (index == _currentIndex) return;
     
-    // Index 0: Beranda → HomeScreen
     if (index == 0) {
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
           builder: (_) => HomeScreen(
             email: '',
-            name: '',
+            name: _userData['nama'] ?? '',
             userId: widget.userId,
           ),
         ),
@@ -35,7 +132,6 @@ class _RiwayatKesehatanPageState extends State<RiwayatKesehatanPage> {
       return;
     }
     
-    // Index 1: Jadwal → CalendarPage
     if (index == 1) {
       Navigator.pushReplacement(
         context,
@@ -44,7 +140,6 @@ class _RiwayatKesehatanPageState extends State<RiwayatKesehatanPage> {
       return;
     }
     
-    // Index 3: Profil → ProfilPage
     if (index == 3) {
       Navigator.pushReplacement(
         context,
@@ -55,8 +150,81 @@ class _RiwayatKesehatanPageState extends State<RiwayatKesehatanPage> {
       return;
     }
     
-    // Index 2: Tetap di halaman ini
     setState(() => _currentIndex = index);
+  }
+
+  String _getStatusText(String status) {
+    switch (status) {
+      case 'ON_TRACK':
+        return 'ON TRACK';
+      case 'PERLU_PEMANTAUAN':
+        return 'PERLU PANTAUAN';
+      case 'WASPADA':
+        return 'WASPADA';
+      case 'RISIKO_TINGGI':
+        return 'RISIKO TINGGI';
+      default:
+        return status;
+    }
+  }
+
+  Color _getStatusColor(String status) {
+    switch (status) {
+      case 'ON_TRACK':
+        return AppColors.success;
+      case 'PERLU_PEMANTAUAN':
+        return AppColors.warning;
+      case 'WASPADA':
+        return AppColors.error;
+      case 'RISIKO_TINGGI':
+        return AppColors.error;
+      default:
+        return AppColors.textSecondary;
+    }
+  }
+
+  // Helper function untuk parse tanggal dengan aman
+  DateTime? _parseDateSafely(dynamic dateValue) {
+    if (dateValue == null) return null;
+    
+    try {
+      String dateString = dateValue.toString();
+      
+      // Jika format sudah YYYY-MM-DD
+      if (dateString.contains('-') && dateString.length == 10) {
+        return DateTime.parse(dateString);
+      }
+      
+      // Jika format DD/MM/YYYY
+      if (dateString.contains('/')) {
+        final parts = dateString.split('/');
+        if (parts.length == 3) {
+          final day = int.parse(parts[0]);
+          final month = int.parse(parts[1]);
+          final year = int.parse(parts[2]);
+          return DateTime(year, month, day);
+        }
+      }
+      
+      // Coba parse langsung
+      return DateTime.parse(dateString);
+    } catch (e) {
+      print('Error parsing date: $dateValue - $e');
+      return null;
+    }
+  }
+
+  String _formatDate(DateTime? date) {
+    if (date == null) return '-';
+    return "${date.day} ${_getMonthName(date.month)} ${date.year}";
+  }
+
+  String _getMonthName(int month) {
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun',
+      'Jul', 'Ags', 'Sep', 'Okt', 'Nov', 'Des'
+    ];
+    return months[month - 1];
   }
 
   @override
@@ -78,22 +246,24 @@ class _RiwayatKesehatanPageState extends State<RiwayatKesehatanPage> {
         ),
         centerTitle: true,
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _header(),
-            const SizedBox(height: 16),
-            _summaryCard(),
-            const SizedBox(height: 16),
-            _phaseCard(),
-            const SizedBox(height: 16),
-            _history(),
-            const SizedBox(height: 24),
-          ],
-        ),
-      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _header(),
+                  const SizedBox(height: 16),
+                  _summaryCard(),
+                  const SizedBox(height: 16),
+                  _phaseCard(),
+                  const SizedBox(height: 16),
+                  _history(),
+                  const SizedBox(height: 24),
+                ],
+              ),
+            ),
       bottomNavigationBar: AppBottomNav(
         currentIndex: _currentIndex,
         onTap: _onNavBarTap,
@@ -101,21 +271,20 @@ class _RiwayatKesehatanPageState extends State<RiwayatKesehatanPage> {
     );
   }
 
-  // ================= HEADER =================
   Widget _header() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
-      children: const [
+      children: [
         Text(
-          "Riwayat Kesehatan",
-          style: TextStyle(
+          "Halo, ${_userData['nama'] ?? 'Pasien'}",
+          style: const TextStyle(
             fontSize: 26,
             fontWeight: FontWeight.bold,
             color: AppColors.textPrimary,
           ),
         ),
-        SizedBox(height: 6),
-        Text(
+        const SizedBox(height: 6),
+        const Text(
           "Pantau kemajuan pengobatan dan kondisi fisik Anda secara berkala.",
           style: TextStyle(color: AppColors.textSecondary),
         ),
@@ -123,7 +292,6 @@ class _RiwayatKesehatanPageState extends State<RiwayatKesehatanPage> {
     );
   }
 
-  // ================= SUMMARY =================
   Widget _summaryCard() {
     return Container(
       padding: const EdgeInsets.all(16),
@@ -139,7 +307,6 @@ class _RiwayatKesehatanPageState extends State<RiwayatKesehatanPage> {
             style: TextStyle(fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 16),
-
           Stack(
             alignment: Alignment.center,
             children: [
@@ -147,24 +314,23 @@ class _RiwayatKesehatanPageState extends State<RiwayatKesehatanPage> {
                 height: 120,
                 width: 120,
                 child: CircularProgressIndicator(
-                  value: 0.95,
+                  value: _kepatuhanPersen,
                   strokeWidth: 10,
                   backgroundColor: AppColors.divider,
-                  valueColor:
-                      const AlwaysStoppedAnimation(AppColors.primary),
+                  valueColor: const AlwaysStoppedAnimation(AppColors.primary),
                 ),
               ),
-              const Column(
+              Column(
                 children: [
                   Text(
-                    "95%",
-                    style: TextStyle(
+                    "${(_kepatuhanPersen * 100).toInt()}%",
+                    style: const TextStyle(
                       fontSize: 24,
                       fontWeight: FontWeight.bold,
                       color: AppColors.primary,
                     ),
                   ),
-                  Text(
+                  const Text(
                     "Patuh",
                     style: TextStyle(color: AppColors.textSecondary),
                   ),
@@ -172,37 +338,35 @@ class _RiwayatKesehatanPageState extends State<RiwayatKesehatanPage> {
               )
             ],
           ),
-
           const SizedBox(height: 16),
-
-          const Row(
+          Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
               Column(
                 children: [
                   Text(
-                    "28",
-                    style: TextStyle(
+                    "$_totalPatuh",
+                    style: const TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
                       color: AppColors.primaryDark,
                     ),
                   ),
-                  Text("Hari Tuntas",
+                  const Text("Hari Tuntas",
                       style: TextStyle(color: AppColors.textSecondary)),
                 ],
               ),
               Column(
                 children: [
                   Text(
-                    "2",
-                    style: TextStyle(
+                    "$_totalTerlewat",
+                    style: const TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
                       color: AppColors.error,
                     ),
                   ),
-                  Text("Terlewat",
+                  const Text("Terlewat",
                       style: TextStyle(color: AppColors.textSecondary)),
                 ],
               ),
@@ -213,8 +377,25 @@ class _RiwayatKesehatanPageState extends State<RiwayatKesehatanPage> {
     );
   }
 
-  // ================= PHASE =================
   Widget _phaseCard() {
+    // Parse tanggal diagnosis dengan aman
+    DateTime? tglDiagnosis;
+    final tglDiagnosisRaw = _userData['tanggal_diagnosis'];
+    
+    if (tglDiagnosisRaw != null) {
+      tglDiagnosis = _parseDateSafely(tglDiagnosisRaw);
+    }
+    
+    final now = DateTime.now();
+    int mingguTerlewati = 0;
+    if (tglDiagnosis != null) {
+      mingguTerlewati = (now.difference(tglDiagnosis).inDays / 7).floor();
+      mingguTerlewati = mingguTerlewati.clamp(0, 24);
+    }
+    
+    final progres = mingguTerlewati / 24;
+    final tglSelesai = tglDiagnosis?.add(const Duration(days: 180));
+    
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -230,31 +411,33 @@ class _RiwayatKesehatanPageState extends State<RiwayatKesehatanPage> {
             style: TextStyle(fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 10),
-
-          const Text("Intensif (Bulan 1-2)   75% Selesai"),
-
+          Text("${(mingguTerlewati / 4).floor() + 1} Bulan Berjalan"),
           const SizedBox(height: 8),
-
           ClipRRect(
             borderRadius: BorderRadius.circular(10),
             child: LinearProgressIndicator(
-              value: 0.75,
+              value: progres,
               minHeight: 10,
               backgroundColor: AppColors.divider,
-              valueColor:
-                  const AlwaysStoppedAnimation(AppColors.primary),
+              valueColor: const AlwaysStoppedAnimation(AppColors.primary),
             ),
           ),
-
           const SizedBox(height: 10),
-
-          const Row(
+          Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text("Mulai: 21 Sep 2023",
-                  style: TextStyle(color: AppColors.textSecondary)),
-              Text("Estimasi: 21 Mar 2024",
-                  style: TextStyle(color: AppColors.textSecondary)),
+              Text(
+                tglDiagnosis != null 
+                    ? "Mulai: ${_formatDate(tglDiagnosis)}"
+                    : "Mulai: -",
+                style: const TextStyle(color: AppColors.textSecondary),
+              ),
+              Text(
+                tglSelesai != null 
+                    ? "Estimasi: ${_formatDate(tglSelesai)}"
+                    : "Estimasi: -",
+                style: const TextStyle(color: AppColors.textSecondary),
+              ),
             ],
           )
         ],
@@ -262,8 +445,23 @@ class _RiwayatKesehatanPageState extends State<RiwayatKesehatanPage> {
     );
   }
 
-  // ================= HISTORY =================
   Widget _history() {
+    if (_screeningHistory.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: const Center(
+          child: Text(
+            "Belum ada riwayat screening",
+            style: TextStyle(color: AppColors.textSecondary),
+          ),
+        ),
+      );
+    }
+    
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -272,38 +470,16 @@ class _RiwayatKesehatanPageState extends State<RiwayatKesehatanPage> {
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 10),
-
-        _historyCard(
-          "Minggu 4",
-          "ON TRACK",
-          AppColors.success,
-          "Batuk berkurang, nafsu makan membaik secara signifikan.",
-          "12 Okt 2023",
-        ),
-
-        _historyCard(
-          "Minggu 3",
-          "PERLU PANTAUAN",
-          AppColors.error,
-          "Demam ringan di malam hari. Keluhan mual setelah minum obat.",
-          "05 Okt 2023",
-        ),
-
-        _historyCard(
-          "Minggu 2",
-          "ON TRACK",
-          AppColors.success,
-          "Tidak ada keluhan berarti. Berat badan mulai stabil.",
-          "28 Sep 2023",
-        ),
-
-        _historyCard(
-          "Minggu 1",
-          "ON TRACK",
-          AppColors.success,
-          "Awal masa pengobatan. Penyesuaian jadwal konsumsi obat.",
-          "21 Sep 2023",
-        ),
+        ..._screeningHistory.map((screening) {
+          final tglScreening = _parseDateSafely(screening['tanggal_screening']);
+          return _historyCard(
+            "Minggu ${screening['minggu_ke']}",
+            _getStatusText(screening['status']),
+            _getStatusColor(screening['status']),
+            screening['kesimpulan_hasil'] ?? "Tidak ada catatan",
+            tglScreening != null ? _formatDate(tglScreening) : "-",
+          );
+        }),
       ],
     );
   }
@@ -334,8 +510,7 @@ class _RiwayatKesehatanPageState extends State<RiwayatKesehatanPage> {
                 style: const TextStyle(fontWeight: FontWeight.bold),
               ),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
                   color: color.withOpacity(0.15),
                   borderRadius: BorderRadius.circular(8),
