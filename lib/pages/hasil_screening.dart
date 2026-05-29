@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:tbc_app/pages/home_page.dart';
 
 class HasilScreeningPage extends StatelessWidget {
   final Map<String, dynamic> hasilData;
@@ -11,7 +12,7 @@ class HasilScreeningPage extends StatelessWidget {
   static const Color _bgColor = Color(0xFFF8FAFC);
   static const Color _cardColor = Colors.white;
 
-  double get _severity => hasilData['skor'] as double? ?? 0;
+  double get _severity => double.tryParse(hasilData['skor']?.toString() ?? '0') ?? 0;
   
   bool get _adaDahakBerdarah => hasilData['adaDahakBerdarah'] as bool? ?? false;
 
@@ -70,7 +71,7 @@ class HasilScreeningPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final info = _statusInfo;
     final beratBadan = hasilData['beratBadan'] as String? ?? '-';
-    final gejala = hasilData['efekSamping'] as String? ?? '-';
+    final gejala = hasilData['gejala'] as String? ?? '-';
     final assessment = hasilData['assessment'] as String? ?? '-';
 
     return Scaffold(
@@ -116,18 +117,6 @@ class HasilScreeningPage extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       child: Row(
         children: [
-          GestureDetector(
-            onTap: () => Navigator.pop(context),
-            child: Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: _bgColor,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: const Icon(Icons.arrow_back, size: 20, color: Color(0xFF374151)),
-            ),
-          ),
           const SizedBox(width: 12),
           const Text(
             'HASIL SCREENING',
@@ -256,8 +245,11 @@ class HasilScreeningPage extends StatelessWidget {
             iconBg: const Color(0xFFDBEAFE),
             iconColor: const Color(0xFF2563EB),
             judul: 'Berat Badan',
-            isi: beratBadan,
+            isi: hasilData['beratBadan'] as String? ?? '-',
             showDivider: true,
+            subIsi: hasilData['beratAwal'] != null && hasilData['beratSekarang'] != null
+                ? 'Berat awal: ${hasilData['beratAwal']} kg → Berat sekarang: ${hasilData['beratSekarang']} kg'
+                : null,
           ),
           _buildKesimpulanItem(
             icon: Icons.list_alt_outlined, // Icon yang valid
@@ -286,6 +278,7 @@ class HasilScreeningPage extends StatelessWidget {
     required Color iconColor,
     required String judul,
     required String isi,
+    String? subIsi,
     required bool showDivider,
   }) {
     return Column(
@@ -326,6 +319,17 @@ class HasilScreeningPage extends StatelessWidget {
                         height: 1.5,
                       ),
                     ),
+                    if (subIsi != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        subIsi,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: Color(0xFF9CA3AF),
+                          height: 1.4,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -344,7 +348,7 @@ class HasilScreeningPage extends StatelessWidget {
       height: 52,
       child: ElevatedButton(
         onPressed: () {
-          Navigator.popUntil(context, (route) => route.isFirst);
+          Navigator.pop(context);
         },
         style: ElevatedButton.styleFrom(
           backgroundColor: const Color(0xFF0D9488),

@@ -17,8 +17,13 @@ class _FormScreeningPageState extends State<FormScreeningPage> {
   int? _answer3; // dahak: 0=Tidak ada, 1=Dahak biasa, 3=Ada darah (special!)
   int? _answer4; // demam: 0=Tidak, 1=Kadang, 2=Sering
   int? _answer5; // sesak: 0=Tidak, 1=Ringan, 2=Berat
-  int? _answer6; // berat badan: 0=Stabil, 1=Turun sedikit, 2=Turun drastis
+  String? _beratBadanSebelumnya; // berat badan awal
+  String? _beratBadanSekarang; // berat badan sekarang
   bool _isSubmitting = false;
+  
+  // Untuk menyimpan berat badan dari database
+  double? _beratAwalDatabase;
+  bool _isLoading = true;
 
   static const Color _primaryColor = Color(0xFF0D9488);
   static const Color _bgColor = Color(0xFFF8FAFC);
@@ -30,7 +35,18 @@ class _FormScreeningPageState extends State<FormScreeningPage> {
   double get _bobot3 => 0.20;
   double get _bobot4 => 0.15;
   double get _bobot5 => 0.10;
-  double get _bobot6 => 0.15;
+
+  // Bobot untuk berat badan berdasarkan perubahan
+  int? get _answer6 {
+    if (_beratAwalDatabase == null || _beratBadanSekarang == null) return null;
+    
+    double beratSekarang = double.tryParse(_beratBadanSekarang!) ?? 0;
+    double selisih = _beratAwalDatabase! - beratSekarang;
+    
+    if (selisih <= 0) return 0; // Stabil atau naik
+    if (selisih < 2) return 1; // Turun sedikit (kurang dari 2 kg)
+    return 2; // Turun drastis (2 kg atau lebih)
+  }
 
   bool get _adaDahakBerdarah => _answer3 == 3;
 
@@ -42,7 +58,7 @@ class _FormScreeningPageState extends State<FormScreeningPage> {
     if (_answer3 != null) score += (_answer3! * _bobot3);
     if (_answer4 != null) score += (_answer4! * _bobot4);
     if (_answer5 != null) score += (_answer5! * _bobot5);
-    if (_answer6 != null) score += (_answer6! * _bobot6);
+    if (_answer6 != null) score += (_answer6! * 0.15);
     
     return score;
   }
@@ -68,7 +84,7 @@ class _FormScreeningPageState extends State<FormScreeningPage> {
     if (_answer3 != null) count++;
     if (_answer4 != null) count++;
     if (_answer5 != null) count++;
-    if (_answer6 != null) count++;
+    if (_beratBadanSekarang != null && _beratBadanSekarang!.isNotEmpty) count++;
     return count;
   }
 
@@ -79,7 +95,7 @@ class _FormScreeningPageState extends State<FormScreeningPage> {
     if (_answer3 == 3) list.add('Ada darah saat batuk ⚠️');
     if (_answer4 == 2) list.add('Demam / keringat malam sering');
     if (_answer5 == 2) list.add('Sesak napas berat / saat istirahat');
-    if (_answer6 == 2) list.add('Berat badan turun drastis');
+    if (_answer6 == 2) list.add('Berat badan turun drastis (≥2 kg)');
     return list;
   }
 
@@ -90,7 +106,7 @@ class _FormScreeningPageState extends State<FormScreeningPage> {
     if (_answer3 == 1) list.add('Dahak biasa');
     if (_answer4 == 1) list.add('Demam / keringat malam kadang');
     if (_answer5 == 1) list.add('Sesak napas ringan');
-    if (_answer6 == 1) list.add('Berat badan turun sedikit');
+    if (_answer6 == 1) list.add('Berat badan turun sedikit (<2 kg)');
     return list;
   }
 
@@ -112,6 +128,48 @@ class _FormScreeningPageState extends State<FormScreeningPage> {
       return '$gejala. Segera konsultasikan ke dokter.';
     } else {
       return '⚠️ Risiko tinggi! Segera konsultasikan ke dokter.';
+    }
+  }
+
+  String _getStatusBeratBadan() {
+    if (_beratAwalDatabase == null || _beratBadanSekarang == null) return 'Data berat badan tidak lengkap';
+    
+    double beratAwal = _beratAwalDatabase!;
+    double beratSekarang = double.tryParse(_beratBadanSekarang!) ?? 0;
+    double selisih = beratAwal - beratSekarang;
+    
+    if (selisih <= 0) {
+      return 'Stabil / Naik (${selisih == 0 ? 'sama' : 'naik ${(-selisih).toStringAsFixed(1)} kg'})';
+    } else if (selisih < 2) {
+      return 'Turun sedikit (${selisih.toStringAsFixed(1)} kg)';
+    } else {
+      return 'Turun drastis (${selisih.toStringAsFixed(1)} kg) - Perlu perhatian medis!';
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _loadBeratAwal();
+  }
+
+  Future<void> _loadBeratAwal() async {
+    final dbHelper = DatabaseHelper();
+    final uid = widget.userId ?? dbHelper.getCurrentUserId();
+    
+    if (uid != null) {
+      final user = await dbHelper.getUserById(uid);
+      if (user != null && user['berat_badan'] != null) {
+        setState(() {
+          _beratAwalDatabase = double.tryParse(user['berat_badan'].toString());
+          _beratBadanSebelumnya = _beratAwalDatabase?.toStringAsFixed(1);
+          _isLoading = false;
+        });
+      } else {
+        setState(() => _isLoading = false);
+      }
+    } else {
+      setState(() => _isLoading = false);
     }
   }
 
@@ -179,6 +237,7 @@ class _FormScreeningPageState extends State<FormScreeningPage> {
         'skor': skor,
         'status': status,
         'kesimpulan_hasil': kesimpulanHasil,
+        'berat_badan_saat_ini': double.tryParse(_beratBadanSekarang!),
       });
       
       if (_gejalaTinggi.isNotEmpty || _gejalaSedang.isNotEmpty) {
@@ -200,11 +259,9 @@ class _FormScreeningPageState extends State<FormScreeningPage> {
         'gejalaSedang': _gejalaSedang,
         'highRisk': _adaRisikoTinggi,
         'adaDahakBerdarah': _adaDahakBerdarah,
-        'beratBadan': _answer6 == 0
-            ? 'Stabil dalam 2 minggu terakhir.'
-            : _answer6 == 1
-                ? 'Turun sedikit, perlu dipantau.'
-                : 'Turun drastis, segera konsultasikan.',
+        'beratBadan': _getStatusBeratBadan(),
+        'beratAwal': _beratBadanSebelumnya,
+        'beratSekarang': _beratBadanSekarang,
         'gejala': _gejalaTinggi.isNotEmpty 
             ? _gejalaTinggi.join(', ')
             : (_gejalaSedang.isNotEmpty ? _gejalaSedang.join(', ') : 'Tidak ada gejala yang dilaporkan'),
@@ -308,15 +365,7 @@ class _FormScreeningPageState extends State<FormScreeningPage> {
                       onChanged: (val) => setState(() => _answer5 = val),
                     ),
                     const SizedBox(height: 12),
-                    _buildQuestion(
-                      number: 6,
-                      icon: Icons.monitor_weight_outlined,
-                      iconColor: const Color(0xFF8B5CF6),
-                      question: 'Bagaimana kondisi berat\nbadan dibanding awal sakit?',
-                      options: const ['Stabil / Naik', 'Turun sedikit', 'Turun drastis'],
-                      selectedIndex: _answer6,
-                      onChanged: (val) => setState(() => _answer6 = val),
-                    ),
+                    _buildBeratBadanQuestion(),
                     const SizedBox(height: 24),
                     _buildSubmitButton(),
                     const SizedBox(height: 24),
@@ -330,74 +379,157 @@ class _FormScreeningPageState extends State<FormScreeningPage> {
     );
   }
 
-  Widget _buildHeader() {
+  Widget _buildBeratBadanQuestion() {
     return Container(
-      color: _cardColor,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      child: Row(
-        children: [
-          GestureDetector(
-            onTap: () => Navigator.maybePop(context),
-            child: Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: _bgColor,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: const Icon(Icons.arrow_back, size: 20, color: Color(0xFF374151)),
-            ),
-          ),
-          const SizedBox(width: 12),
-          const Text(
-            'SCREENING MINGGUAN',
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w700,
-              color: Color(0xFF111827),
-              letterSpacing: 0.5,
-            ),
+      decoration: BoxDecoration(
+        color: _cardColor,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
           ),
         ],
       ),
-    );
-  }
-
-  Widget _buildProgressBar() {
-    final progress = _answeredCount / 6;
-    return Container(
-      color: _cardColor,
-      padding: const EdgeInsets.fromLTRB(16, 4, 16, 14),
+      padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'Progress Screening',
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                  color: _primaryColor,
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF8B5CF6).withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(10),
                 ),
+                child: const Icon(Icons.monitor_weight_outlined, size: 20, color: Color(0xFF8B5CF6)),
               ),
-              const Spacer(),
-              Text(
-                '$_answeredCount dari 6 Pertanyaan',
-                style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Text(
+                  '6. Berat Badan Saat Ini',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF111827),
+                    height: 1.4,
+                  ),
+                ),
               ),
             ],
           ),
-          const SizedBox(height: 8),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(100),
-            child: LinearProgressIndicator(
-              value: progress,
-              minHeight: 6,
-              backgroundColor: const Color(0xFFE5E7EB),
-              valueColor: AlwaysStoppedAnimation<Color>(_primaryColor),
+          const SizedBox(height: 12),
+          if (_isLoading)
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.all(16),
+                child: CircularProgressIndicator(),
+              ),
+            )
+          else if (_beratAwalDatabase != null)
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF0FDF4),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFF86EFAC)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    '📊 Data Berat Badan Awal',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF166534),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${_beratAwalDatabase!.toStringAsFixed(1)} kg',
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF14532D),
+                    ),
+                  ),
+                ],
+              ),
+            )
+          else
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFEF3C7),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFFFDE68A)),
+              ),
+              child: const Text(
+                '⚠️ Data berat badan awal tidak ditemukan. Silakan input berat badan saat ini sebagai referensi.',
+                style: TextStyle(fontSize: 12, color: Color(0xFF92400E)),
+              ),
             ),
+          const SizedBox(height: 12),
+          TextField(
+            decoration: InputDecoration(
+              labelText: 'Berat Badan Saat Ini (kg)',
+              hintText: 'Contoh: 58.5',
+              prefixIcon: const Icon(Icons.monitor_weight, size: 20),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: const BorderSide(color: Color(0xFF0D9488), width: 2),
+              ),
+            ),
+            keyboardType: TextInputType.numberWithOptions(decimal: true),
+            onChanged: (value) {
+              setState(() {
+                _beratBadanSekarang = value;
+              });
+            },
           ),
+          if (_beratBadanSekarang != null && _beratBadanSekarang!.isNotEmpty && _beratAwalDatabase != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF1F5F9),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      _answer6 == 0 ? Icons.trending_up : (_answer6 == 1 ? Icons.trending_down : Icons.warning),
+                      size: 16,
+                      color: _answer6 == 0 ? Colors.green : (_answer6 == 1 ? Colors.orange : Colors.red),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _getStatusBeratBadan(),
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: _answer6 == 0 ? Colors.green : (_answer6 == 1 ? Colors.orange : Colors.red),
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -514,6 +646,79 @@ class _FormScreeningPageState extends State<FormScreeningPage> {
               ),
             );
           }),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHeader() {
+    return Container(
+      color: _cardColor,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      child: Row(
+        children: [
+          GestureDetector(
+            onTap: () => Navigator.maybePop(context),
+            child: Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: _bgColor,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.arrow_back, size: 20, color: Color(0xFF374151)),
+            ),
+          ),
+          const SizedBox(width: 12),
+          const Text(
+            'SCREENING MINGGUAN',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF111827),
+              letterSpacing: 0.5,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildProgressBar() {
+    final progress = _answeredCount / 6;
+    return Container(
+      color: _cardColor,
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                'Progress Screening',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                  color: _primaryColor,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                '$_answeredCount dari 6 Pertanyaan',
+                style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(100),
+            child: LinearProgressIndicator(
+              value: progress,
+              minHeight: 6,
+              backgroundColor: const Color(0xFFE5E7EB),
+              valueColor: AlwaysStoppedAnimation<Color>(_primaryColor),
+            ),
+          ),
         ],
       ),
     );

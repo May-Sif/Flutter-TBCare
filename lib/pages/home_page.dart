@@ -51,7 +51,12 @@ class _HomeScreenState extends State<HomeScreen> {
   List<String> _gejalaSedang = [];
   
   double _beratBadan = 0;
+  // Berat badan 
+  double _beratBadanTerbaru = 0;
+  double _beratBadanSebelumnya = 0;
   double _selisihBerat = 0;
+  String _tanggalBeratTerbaru = '';
+
 
   @override
   void initState() {
@@ -112,6 +117,17 @@ class _HomeScreenState extends State<HomeScreen> {
         }
       });
       
+      // Load efek samping terbaru
+      await _loadLatestEfekSamping(userId);
+
+      // Load data berat badan terbaru
+      await _loadBeratBadanData(userId);
+      
+      // Cek status screening
+      await _checkScreeningStatus(userId);
+
+      setState(() => _isLoading = false);
+      
     } catch (e) {
       print('Error loading home data: $e');
       setState(() => _isLoading = false);
@@ -155,6 +171,144 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {});
   }
 
+  Future<void> _loadBeratBadanData(int userId) async {
+    final dbHelper = DatabaseHelper();
+    final db = await dbHelper.database;
+    
+    // Ambil 2 data berat badan terbaru dari screening_mingguan
+    final result = await db.rawQuery('''
+      SELECT berat_badan_saat_ini, tanggal_screening 
+      FROM screening_mingguan 
+      WHERE user_id = ? AND berat_badan_saat_ini IS NOT NULL
+      ORDER BY tanggal_screening DESC 
+      LIMIT 2
+    ''', [userId]);
+    
+    if (result.isNotEmpty) {
+      // Data terbaru
+      _beratBadanTerbaru = (result[0]['berat_badan_saat_ini'] as num?)?.toDouble() ?? 0;
+      _tanggalBeratTerbaru = result[0]['tanggal_screening'] as String? ?? '';
+      
+      // Data sebelumnya (jika ada)
+      if (result.length > 1) {
+        _beratBadanSebelumnya = (result[1]['berat_badan_saat_ini'] as num?)?.toDouble() ?? 0;
+        _selisihBerat = _beratBadanTerbaru - _beratBadanSebelumnya;
+      } else {
+        _beratBadanSebelumnya = 0;
+        _selisihBerat = 0;
+      }
+    } else {
+      _beratBadanTerbaru = 0;
+      _beratBadanSebelumnya = 0;
+      _selisihBerat = 0;
+      _tanggalBeratTerbaru = '';
+    }
+    
+    setState(() {});
+  }
+
+  Future<void> _checkScreeningStatus(int userId) async {
+    final dbHelper = DatabaseHelper();
+    final db = await dbHelper.database;
+    
+    // Hitung minggu ke berapa sekarang (berdasarkan tanggal diagnosis)
+    final user = await dbHelper.getUserById(userId);
+    DateTime? tglDiagnosis;
+    
+    if (user != null && user['tanggal_diagnosis'] != null) {
+      tglDiagnosis = _parseDateSafely(user['tanggal_diagnosis']);
+    }
+    
+    if (tglDiagnosis == null) {
+      setState(() {
+        _sudahIsiSkrining = false;
+        _gejalaTinggi = [];
+        _gejalaSedang = [];
+      });
+      return;
+    }
+    
+    final now = DateTime.now();
+    int mingguKe = (now.difference(tglDiagnosis).inDays / 7).floor() + 1;
+    mingguKe = mingguKe.clamp(1, 24);
+    
+    // Cek apakah sudah ada screening untuk minggu ini
+    final screening = await db.query(
+      'screening_mingguan',
+      where: 'user_id = ? AND minggu_ke = ?',
+      whereArgs: [userId, mingguKe],
+    );
+    
+    if (screening.isNotEmpty) {
+      // Ambil screening terbaru
+      final screeningData = screening.first;
+      
+      // Ambil efek samping (gejala) dari screening ini
+      final efekSamping = await db.query(
+        'efek_samping',
+        where: 'user_id = ? AND tanggal = ?',
+        whereArgs: [userId, screeningData['tanggal_screening']],
+      );
+      
+      // Pisahkan gejala tinggi dan sedang
+      List<String> gejalaTinggi = [];
+      List<String> gejalaSedang = [];
+      
+      for (var efek in efekSamping) {
+        String namaEfek = efek['efek'] as String;
+        // Cek apakah gejala termasuk tinggi atau sedang
+        if (namaEfek.contains('⚠️') || 
+            namaEfek.contains('drastis') || 
+            namaEfek.contains('berat') ||
+            namaEfek.contains('sering') ||
+            namaEfek.contains('darah')) {
+          gejalaTinggi.add(namaEfek);
+        } else {
+          gejalaSedang.add(namaEfek);
+        }
+      }
+      
+      setState(() {
+        _sudahIsiSkrining = true;
+        _gejalaTinggi = gejalaTinggi;
+        _gejalaSedang = gejalaSedang;
+      });
+    } else {
+      setState(() {
+        _sudahIsiSkrining = false;
+        _gejalaTinggi = [];
+        _gejalaSedang = [];
+      });
+    }
+  }
+
+  // Helper untuk parse tanggal
+  DateTime? _parseDateSafely(dynamic dateValue) {
+    if (dateValue == null) return null;
+    
+    try {
+      String dateString = dateValue.toString();
+      
+      if (dateString.contains('-') && dateString.length == 10) {
+        return DateTime.parse(dateString);
+      }
+      
+      if (dateString.contains('/')) {
+        final parts = dateString.split('/');
+        if (parts.length == 3) {
+          final day = int.parse(parts[0]);
+          final month = int.parse(parts[1]);
+          final year = int.parse(parts[2]);
+          return DateTime(year, month, day);
+        }
+      }
+      
+      return DateTime.parse(dateString);
+    } catch (e) {
+      print('Error parsing date: $dateValue - $e');
+      return null;
+    }
+  }
   String _getSkorLabel(int skor) {
     switch (skor) {
       case 1: return 'Ringan';
@@ -597,9 +751,10 @@ class _HomeScreenState extends State<HomeScreen> {
                         children: [
                           Expanded(
                             child: _BeratBadanCard(
-                              beratBadan: _beratBadan,
+                              beratBadan: _beratBadanTerbaru,
+                              beratSebelumnya: _beratBadanSebelumnya,
                               selisih: _selisihBerat,
-                              onUpdate: () {},
+                              tanggal: _tanggalBeratTerbaru,
                             ),
                           ),
                           const SizedBox(width: 12),
@@ -624,6 +779,13 @@ class _HomeScreenState extends State<HomeScreen> {
                                     _gejalaTinggi = List<String>.from(result['gejalaTinggi'] ?? []);
                                     _gejalaSedang = List<String>.from(result['gejalaSedang'] ?? []);
                                   });
+                                }
+                                if (widget.userId != null) {
+                                  await _loadBeratBadanData(widget.userId!);
+                                }
+
+                                if (widget.userId != null) {
+                                  await _checkScreeningStatus(widget.userId!);
                                 }
                               },
                             ),
@@ -1186,18 +1348,23 @@ class _ObatCard extends StatelessWidget {
 
 class _BeratBadanCard extends StatelessWidget {
   final double beratBadan;
+  final double beratSebelumnya;
   final double selisih;
-  final VoidCallback onUpdate;
+  final String tanggal;
 
   const _BeratBadanCard({
     required this.beratBadan,
+    required this.beratSebelumnya,
     required this.selisih,
-    required this.onUpdate,
+    required this.tanggal,
   });
 
   @override
   Widget build(BuildContext context) {
-    final turun = selisih < 0;
+    final bool naik = selisih > 0;
+    final bool turun = selisih < 0;
+    final bool adaData = beratBadan > 0;
+    
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -1223,60 +1390,127 @@ class _BeratBadanCard extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           Text(
-            beratBadan > 0 ? '${beratBadan.toStringAsFixed(1)}kg' : '-- kg',
+            adaData ? '${beratBadan.toStringAsFixed(1)} kg' : '-- kg',
             style: const TextStyle(
-              fontSize: 30,
+              fontSize: 32,
               fontWeight: FontWeight.bold,
               color: AppColors.textPrimary,
               height: 1.0,
             ),
           ),
           const SizedBox(height: 8),
-          if (beratBadan > 0) ...[
-            Row(
-              children: [
-                Icon(
-                  turun ? Icons.arrow_downward : Icons.arrow_upward,
-                  size: 13,
-                  color: turun ? const Color(0xFFD32F2F) : AppColors.success,
-                ),
-                const SizedBox(width: 2),
-                Flexible(
-                  child: Text(
-                    '${selisih.abs().toStringAsFixed(1)} kg dari minggu lalu',
+          if (adaData && tanggal.isNotEmpty)
+            Text(
+              _formatTanggal(tanggal),
+              style: const TextStyle(fontSize: 11, color: AppColors.textSecondary),
+            ),
+          const SizedBox(height: 12),
+          if (adaData && beratSebelumnya > 0) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: naik 
+                    ? AppColors.success.withOpacity(0.1)
+                    : (turun 
+                        ? const Color(0xFFD32F2F).withOpacity(0.1)
+                        : Colors.grey.withOpacity(0.1)),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    naik ? Icons.arrow_upward : (turun ? Icons.arrow_downward : Icons.remove),
+                    size: 14,
+                    color: naik 
+                        ? AppColors.success
+                        : (turun ? const Color(0xFFD32F2F) : Colors.grey),
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    selisih == 0 
+                        ? 'Stabil (${selisih.abs().toStringAsFixed(1)} kg)'
+                        : '${naik ? 'Naik' : 'Turun'} ${selisih.abs().toStringAsFixed(1)} kg',
                     style: TextStyle(
-                      fontSize: 11,
-                      color: turun ? const Color(0xFFD32F2F) : AppColors.success,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: naik 
+                          ? AppColors.success
+                          : (turun ? const Color(0xFFD32F2F) : Colors.grey),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Dari ${beratSebelumnya.toStringAsFixed(1)} kg (minggu lalu)',
+              style: const TextStyle(fontSize: 11, color: AppColors.textSecondary),
+            ),
+          ] else if (adaData && beratSebelumnya == 0) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.grey.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.info_outline, size: 14, color: Colors.grey),
+                  SizedBox(width: 4),
+                  Text(
+                    'Data pertama',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.grey),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Belum ada data sebelumnya',
+              style: TextStyle(fontSize: 11, color: AppColors.textSecondary, fontStyle: FontStyle.italic),
             ),
           ] else ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.grey.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.warning_amber_outlined, size: 14, color: Colors.grey),
+                  SizedBox(width: 4),
+                  Text(
+                    'Belum ada data',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.grey),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
             const Text(
-              'Belum ada data',
-              style: TextStyle(fontSize: 12, color: AppColors.textSecondary, fontStyle: FontStyle.italic),
+              'Isi screening mingguan untuk mencatat berat badan',
+              style: TextStyle(fontSize: 11, color: AppColors.textSecondary, fontStyle: FontStyle.italic),
             ),
           ],
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton(
-              onPressed: onUpdate,
-              style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                side: BorderSide(color: AppColors.primary.withOpacity(0.4)),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-              ),
-              child: const Text(
-                'Perbarui',
-                style: TextStyle(fontSize: 12, color: AppColors.primary, fontWeight: FontWeight.w600),
-              ),
-            ),
-          ),
         ],
       ),
     );
+  }
+  
+  String _formatTanggal(String tanggal) {
+    try {
+      final parts = tanggal.split('-');
+      if (parts.length == 3) {
+        return 'Terakhir diperbarui: ${parts[2]}/${parts[1]}/${parts[0]}';
+      }
+      return 'Terakhir diperbarui: $tanggal';
+    } catch (e) {
+      return 'Terakhir diperbarui: $tanggal';
+    }
   }
 }
 

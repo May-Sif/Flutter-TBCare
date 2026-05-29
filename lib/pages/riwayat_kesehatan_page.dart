@@ -102,17 +102,85 @@ class _RiwayatKesehatanPageState extends State<RiwayatKesehatanPage> {
   }
 
   Future<void> _calculateKepatuhan(int userId) async {
-    final now = DateTime.now();
-    final bulanStr = '${now.year}-${now.month.toString().padLeft(2, '0')}';
-    final daysInMonth = DateTime(now.year, now.month + 1, 0).day;
-    
-    final patuh = await _dbHelper.getKepatuhanCount(userId, bulanStr);
-    
-    setState(() {
-      _totalPatuh = patuh;
-      _totalTerlewat = daysInMonth - patuh;
-      _kepatuhanPersen = daysInMonth > 0 ? patuh / daysInMonth : 0;
-    });
+    try {
+      final db = await _dbHelper.database;
+      final now = DateTime.now();
+      
+      // Ambil tanggal mulai pengobatan
+      DateTime? tglMulai;
+      final user = await _dbHelper.getUserById(userId);
+      if (user != null && user['tanggal_diagnosis'] != null) {
+        tglMulai = _parseDateSafely(user['tanggal_diagnosis']);
+      }
+      
+      if (tglMulai == null) {
+        setState(() {
+          _totalPatuh = 0;
+          _totalTerlewat = 0;
+          _kepatuhanPersen = 0;
+        });
+        return;
+      }
+      
+      // Ambil jadwal obat user
+      final jadwalObat = await db.query(
+        'jadwal_obat',
+        where: 'user_id = ?',
+        whereArgs: [userId],
+      );
+      final int sesiPerHari = jadwalObat.length;
+      
+      // Hitung total hari
+      final int totalHari = now.difference(tglMulai).inDays + 1;
+      
+      // Ambil data kepatuhan
+      final String startDate = tglMulai.toIso8601String().split('T').first;
+      final String todayStr = now.toIso8601String().split('T').first;
+      
+      final patuhRecords = await db.query(
+        'sesi_kepatuhan',
+        where: 'user_id = ? AND tanggal >= ? AND tanggal <= ? AND status = 1',
+        whereArgs: [userId, startDate, todayStr],
+      );
+      
+      // Hitung hari tuntas
+      int totalHariTuntas = 0;
+      
+      for (int i = 0; i < totalHari; i++) {
+        final tanggalLoop = DateTime(tglMulai.year, tglMulai.month, tglMulai.day + i);
+        final tanggalStr = tanggalLoop.toIso8601String().split('T').first;
+        
+        int patuhPadaHariIni = 0;
+        for (var record in patuhRecords) {
+          final recordTanggal = record['tanggal']?.toString() ?? '';
+          if (recordTanggal == tanggalStr) {
+            patuhPadaHariIni++;
+          }
+        }
+        
+        if (patuhPadaHariIni == sesiPerHari && sesiPerHari > 0) {
+          totalHariTuntas++;
+        }
+      }
+      
+      if (mounted) {
+        setState(() {
+          _totalPatuh = totalHariTuntas;
+          _totalTerlewat = totalHari - totalHariTuntas;
+          _kepatuhanPersen = totalHari > 0 ? totalHariTuntas / totalHari : 0;
+        });
+      }
+    } catch (e, stacktrace) {
+      print('ERROR di _calculateKepatuhan: $e');
+      print('Stacktrace: $stacktrace');
+      if (mounted) {
+        setState(() {
+          _totalPatuh = 0;
+          _totalTerlewat = 0;
+          _kepatuhanPersen = 0;
+        });
+      }
+    }
   }
 
   void _onNavBarTap(int index) {
@@ -251,7 +319,7 @@ class _RiwayatKesehatanPageState extends State<RiwayatKesehatanPage> {
           : SingleChildScrollView(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   _header(),
                   const SizedBox(height: 16),
@@ -293,6 +361,8 @@ class _RiwayatKesehatanPageState extends State<RiwayatKesehatanPage> {
   }
 
   Widget _summaryCard() {
+    final bool hasData = _totalPatuh > 0 || _totalTerlewat > 0;
+    
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -307,71 +377,96 @@ class _RiwayatKesehatanPageState extends State<RiwayatKesehatanPage> {
             style: TextStyle(fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 16),
-          Stack(
-            alignment: Alignment.center,
-            children: [
-              SizedBox(
-                height: 120,
-                width: 120,
-                child: CircularProgressIndicator(
-                  value: _kepatuhanPersen,
-                  strokeWidth: 10,
-                  backgroundColor: AppColors.divider,
-                  valueColor: const AlwaysStoppedAnimation(AppColors.primary),
-                ),
-              ),
-              Column(
+          if (!hasData) ...[
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 20),
+              child: Column(
                 children: [
+                  Icon(Icons.info_outline, size: 48, color: AppColors.textSecondary),
+                  SizedBox(height: 8),
                   Text(
-                    "${(_kepatuhanPersen * 100).toInt()}%",
-                    style: const TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.primary,
-                    ),
-                  ),
-                  const Text(
-                    "Patuh",
+                    "Belum ada data kepatuhan",
                     style: TextStyle(color: AppColors.textSecondary),
                   ),
-                ],
-              )
-            ],
-          ),
-          const SizedBox(height: 16),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              Column(
-                children: [
                   Text(
-                    "$_totalPatuh",
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.primaryDark,
-                    ),
+                    "Mulai minum obat untuk melihat ringkasan",
+                    style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
                   ),
-                  const Text("Hari Tuntas",
-                      style: TextStyle(color: AppColors.textSecondary)),
                 ],
               ),
-              Column(
-                children: [
-                  Text(
-                    "$_totalTerlewat",
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.error,
-                    ),
+            ),
+          ] else ...[
+            Stack(
+              alignment: Alignment.center,
+              children: [
+                SizedBox(
+                  height: 120,
+                  width: 120,
+                  child: CircularProgressIndicator(
+                    value: _kepatuhanPersen,
+                    strokeWidth: 10,
+                    backgroundColor: AppColors.divider,
+                    valueColor: const AlwaysStoppedAnimation(AppColors.primary),
                   ),
-                  const Text("Terlewat",
-                      style: TextStyle(color: AppColors.textSecondary)),
-                ],
-              ),
-            ],
-          )
+                ),
+                Column(
+                  children: [
+                    Text(
+                      "${(_kepatuhanPersen * 100).toInt()}%",
+                      style: const TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.primary,
+                      ),
+                    ),
+                    const Text(
+                      "Patuh",
+                      style: TextStyle(color: AppColors.textSecondary),
+                    ),
+                  ],
+                )
+              ],
+            ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                Column(
+                  children: [
+                    Text(
+                      "$_totalPatuh",
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.primaryDark,
+                      ),
+                    ),
+                    const Text("Hari Tuntas",
+                        style: TextStyle(color: AppColors.textSecondary)),
+                  ],
+                ),
+                Column(
+                  children: [
+                    Text(
+                      "$_totalTerlewat",
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.error,
+                      ),
+                    ),
+                    const Text("Terlewat",
+                        style: TextStyle(color: AppColors.textSecondary)),
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              "Total Hari: ${_totalPatuh + _totalTerlewat}",
+              style: const TextStyle(fontSize: 11, color: AppColors.textSecondary),
+            ),
+          ],
         ],
       ),
     );
@@ -387,14 +482,17 @@ class _RiwayatKesehatanPageState extends State<RiwayatKesehatanPage> {
     }
     
     final now = DateTime.now();
-    int mingguTerlewati = 0;
+    final int totalHariPengobatan = 180; // 6 bulan × 30 hari
+    int hariTerlewati = 0;
+    
     if (tglDiagnosis != null) {
-      mingguTerlewati = (now.difference(tglDiagnosis).inDays / 7).floor();
-      mingguTerlewati = mingguTerlewati.clamp(0, 24);
+      hariTerlewati = now.difference(tglDiagnosis).inDays;
+      hariTerlewati = hariTerlewati.clamp(0, totalHariPengobatan);
     }
     
-    final progres = mingguTerlewati / 24;
-    final tglSelesai = tglDiagnosis?.add(const Duration(days: 180));
+    final double progres = hariTerlewati / totalHariPengobatan;
+    final int bulanBerjalan = (hariTerlewati / 30).floor() + 1;
+    final tglSelesai = tglDiagnosis?.add(Duration(days: totalHariPengobatan));
     
     return Container(
       padding: const EdgeInsets.all(16),
@@ -411,7 +509,7 @@ class _RiwayatKesehatanPageState extends State<RiwayatKesehatanPage> {
             style: TextStyle(fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 10),
-          Text("${(mingguTerlewati / 4).floor() + 1} Bulan Berjalan"),
+          Text("$bulanBerjalan Bulan Berjalan"),
           const SizedBox(height: 8),
           ClipRRect(
             borderRadius: BorderRadius.circular(10),
@@ -439,7 +537,15 @@ class _RiwayatKesehatanPageState extends State<RiwayatKesehatanPage> {
                 style: const TextStyle(color: AppColors.textSecondary),
               ),
             ],
-          )
+          ),
+          const SizedBox(height: 6),
+          Text(
+            "Hari ke-$hariTerlewati dari $totalHariPengobatan",
+            style: const TextStyle(
+              fontSize: 12,
+              color: AppColors.textSecondary,
+            ),
+          ),
         ],
       ),
     );

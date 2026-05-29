@@ -6,6 +6,7 @@ class ScreeningMingguan {
   int skor;
   String status; // 'ON TRACK', 'PERLU_PEMANTAUAN', 'WASPADA', 'RISIKO_TINGGI'
   String kesimpulanHasil;
+  double? beratBadanSaatIni;
 
   ScreeningMingguan({
     this.id,
@@ -15,6 +16,7 @@ class ScreeningMingguan {
     required this.skor,
     required this.status,
     required this.kesimpulanHasil,
+    required this.beratBadanSaatIni,
   });
 
   factory ScreeningMingguan.fromMap(Map<String, dynamic> map) {
@@ -26,6 +28,9 @@ class ScreeningMingguan {
       skor: map['skor'],
       status: map['status'],
       kesimpulanHasil: map['kesimpulan_hasil'],
+      beratBadanSaatIni: map['berat_badan_saat_ini'] != null 
+          ? (map['berat_badan_saat_ini'] as num).toDouble() 
+          : null, // TAMBAHKAN INI
     );
   }
 
@@ -38,6 +43,7 @@ class ScreeningMingguan {
       'skor': skor,
       'status': status,
       'kesimpulan_hasil': kesimpulanHasil,
+      'berat_badan_saat_ini': beratBadanSaatIni,
     };
   }
 }
