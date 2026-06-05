@@ -1,10 +1,8 @@
- // lib/pages/profile_page.dart
-
 import 'package:flutter/material.dart';
 import 'package:tbc_app/pages/authentication/authentication.dart';
 import 'package:tbc_app/pages/isi_datadiri.dart';
 import 'package:tbc_app/theme.dart';
-import 'package:tbc_app/database/database_helper.dart'; // IMPORT DATABASE
+import 'package:tbc_app/database/database_helper.dart';
 import 'isi_dataobat.dart';
 
 class ProfilPage extends StatefulWidget {
@@ -82,7 +80,7 @@ class _ProfilPageState extends State<ProfilPage> {
         email: await dbHelper.getUserEmail(widget.userId!),
       );
       
-      print('✅ Data berhasil disimpan ke database');
+      print('Data berhasil disimpan ke database');
     } catch (e) {
       print('Error saving data: $e');
     }

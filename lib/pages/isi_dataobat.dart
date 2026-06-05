@@ -1,5 +1,3 @@
-// lib/pages/isi_dataobat.dart
-
 import 'package:flutter/material.dart';
 import 'package:tbc_app/pages/home_page.dart';
 import 'package:tbc_app/theme.dart';
@@ -119,7 +117,6 @@ class _IsiDataObatPageState extends State<IsiDataObatPage> {
     }
   }
 
-  // VALIDASI WAKTU BERDASARKAN SESI
   bool _isValidTimeForSession(String session, TimeOfDay time) {
     final hour = time.hour;
     final minute = time.minute;
@@ -127,7 +124,7 @@ class _IsiDataObatPageState extends State<IsiDataObatPage> {
     
     switch (session) {
       case 'Pagi':
-        // Pagi: 00:00 - 10:59 (00:00 sampai 10:59)
+        // Pagi: 00:00 - 10:59
         return totalMinutes <= 10 * 60 + 59;
         
       case 'Siang':
@@ -157,7 +154,13 @@ class _IsiDataObatPageState extends State<IsiDataObatPage> {
   }
 
   Future<void> _selectTime(int sessionIndex, int medIndex) async {
-    TimeOfDay currentTime = const TimeOfDay(hour: 7, minute: 0);
+    final sessionDefaults = [
+      const TimeOfDay(hour: 7, minute: 0),
+      const TimeOfDay(hour: 12, minute: 0),
+      const TimeOfDay(hour: 18, minute: 0),
+    ];
+
+    TimeOfDay currentTime = sessionDefaults[sessionIndex];
     String sessionName = '';
     
     if (sessionIndex == 0) {
@@ -187,7 +190,6 @@ class _IsiDataObatPageState extends State<IsiDataObatPage> {
     );
 
     if (picked != null) {
-      // VALIDASI WAKTU
       if (!_isValidTimeForSession(sessionName, picked)) {
         final range = _getValidTimeRange(sessionName);
         ScaffoldMessenger.of(context).showSnackBar(
@@ -229,14 +231,20 @@ class _IsiDataObatPageState extends State<IsiDataObatPage> {
   }
 
   void _addMedication(int sessionIndex) {
+    final defaultTimes = [
+      const TimeOfDay(hour: 7, minute: 0),
+      const TimeOfDay(hour: 12, minute: 0),
+      const TimeOfDay(hour: 18, minute: 0),
+    ];
+
     setState(() {
       Medication newMed = Medication(
         name: '',
-        time: const TimeOfDay(hour: 7, minute: 0),
+        time: defaultTimes[sessionIndex],
         mealTiming: 'Setelah Makan',
         keterangan: '',
       );
-      
+
       if (sessionIndex == 0) {
         _pagiMedications.medications.add(newMed);
       } else if (sessionIndex == 1) {
@@ -259,7 +267,6 @@ class _IsiDataObatPageState extends State<IsiDataObatPage> {
     });
   }
 
-  // VALIDASI SEBELUM SUBMIT
   bool _validateAllTimes() {
     // Validasi sesi Pagi
     for (var med in _pagiMedications.medications) {
@@ -307,11 +314,10 @@ class _IsiDataObatPageState extends State<IsiDataObatPage> {
   }
 
   void _submit() async {
-    // Validasi semua waktu terlebih dahulu
     if (!_validateAllTimes()) {
       return;
     }
-    
+
     List<Map<String, dynamic>> jadwalObat = [];
 
     // Kumpulkan obat pagi
@@ -353,11 +359,6 @@ class _IsiDataObatPageState extends State<IsiDataObatPage> {
       }
     }
 
-    Map<String, dynamic> dataDiriDynamic = {};
-    if (widget.dataDiri != null) {
-      dataDiriDynamic = Map<String, dynamic>.from(widget.dataDiri!);
-    }
-
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -366,34 +367,68 @@ class _IsiDataObatPageState extends State<IsiDataObatPage> {
 
     try {
       final dbHelper = DatabaseHelper();
-      
-      int userId = await dbHelper.saveCompleteUserData(
-        dataDiriDynamic,
-        jadwalObat,
-        email: widget.email,
-      );
-      
-      dbHelper.setLoggedInUser(userId);
-      
-      if (!mounted) return;
-      Navigator.pop(context);
-      
-      String namaPasien = '';
-      if (widget.dataDiri != null && widget.dataDiri!['nama'] != null) {
-        namaPasien = widget.dataDiri!['nama']!;
-      }
+      final isEditing = widget.existingJadwalObat != null;
 
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (_) => HomeScreen(
-            email: widget.email ?? '',
-            name: widget.name ?? namaPasien,
-            photoUrl: null,
-            userId: userId,
+      if (isEditing) {
+        int userId = widget.userId ?? dbHelper.getCurrentUserId()!;
+
+        int? jadwalId = await dbHelper.getJadwalIdByUserId(userId);
+        if (jadwalId != null) {
+          await dbHelper.deleteSesiByJadwalId(jadwalId);
+        } else {
+          jadwalId = await dbHelper.insertJadwal(userId);
+        }
+
+        for (var obat in jadwalObat) {
+          await dbHelper.insertSesi({
+            'jadwal_id': jadwalId,
+            'nama_sesi': obat['sesi'].toLowerCase(),
+            'nama_obat': obat['namaObat'],
+            'waktu': obat['waktu'],
+            'waktu_makan': obat['waktuMakan'],
+            'keterangan': obat['keterangan'],
+          });
+        }
+
+        if (!mounted) return;
+        Navigator.pop(context);
+
+        Navigator.pop(context, {'jadwalObat': jadwalObat});
+
+      } else {
+        Map<String, dynamic> dataDiriDynamic = {};
+        if (widget.dataDiri != null) {
+          dataDiriDynamic = Map<String, dynamic>.from(widget.dataDiri!);
+        }
+
+        int userId = await dbHelper.saveCompleteUserData(
+          dataDiriDynamic,
+          jadwalObat,
+          email: widget.email,
+        );
+
+        dbHelper.setLoggedInUser(userId);
+
+        if (!mounted) return;
+        Navigator.pop(context);
+
+        String namaPasien = '';
+        if (widget.dataDiri != null && widget.dataDiri!['nama'] != null) {
+          namaPasien = widget.dataDiri!['nama']!;
+        }
+
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => HomeScreen(
+              email: widget.email ?? '',
+              name: widget.name ?? namaPasien,
+              photoUrl: null,
+              userId: userId,
+            ),
           ),
-        ),
-      );
+        );
+      }
     } catch (e) {
       if (!mounted) return;
       Navigator.pop(context);
@@ -435,6 +470,13 @@ class _IsiDataObatPageState extends State<IsiDataObatPage> {
                 color: AppColors.textPrimary,
               ),
             ),
+            const Text(
+              'Pukul 00.00 – 10.59',
+              style: TextStyle(
+                fontSize: 12,
+                color: AppColors.textSecondary,
+              ),
+            ),
             const SizedBox(height: 8),
             DashedBorderContainer(
               color: AppColors.textSecondary.withOpacity(0.5),
@@ -455,6 +497,13 @@ class _IsiDataObatPageState extends State<IsiDataObatPage> {
                 color: AppColors.textPrimary,
               ),
             ),
+            const Text(
+              'Pukul 11.00 – 14.59',
+              style: TextStyle(
+                fontSize: 12,
+                color: AppColors.textSecondary,
+              ),
+            ),
             const SizedBox(height: 8),
             DashedBorderContainer(
               color: AppColors.textSecondary.withOpacity(0.5),
@@ -473,6 +522,13 @@ class _IsiDataObatPageState extends State<IsiDataObatPage> {
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
                 color: AppColors.textPrimary,
+              ),
+            ),
+            const Text(
+              'Pukul 15.00 – 23.59',
+              style: TextStyle(
+                fontSize: 12,
+                color: AppColors.textSecondary,
               ),
             ),
             const SizedBox(height: 8),
@@ -537,12 +593,13 @@ class _IsiDataObatPageState extends State<IsiDataObatPage> {
                       Expanded(
                         child: TextFormField(
                           initialValue: med.name,
-                          decoration: const InputDecoration(
+                          decoration: InputDecoration(
                             hintText: 'Nama Obat',
+                            hintStyle: TextStyle(color: Colors.grey.shade400),
                             border: InputBorder.none,
                             filled: true,
                             fillColor: Colors.white,
-                            contentPadding: EdgeInsets.symmetric(
+                            contentPadding: const EdgeInsets.symmetric(
                               horizontal: 16,
                               vertical: 10,  
                             ),
@@ -632,12 +689,13 @@ class _IsiDataObatPageState extends State<IsiDataObatPage> {
                   const SizedBox(height: 12),
                   TextFormField(
                     initialValue: med.keterangan,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       hintText: 'Keterangan (Optional)',
+                      hintStyle: TextStyle(color: Colors.grey.shade400),
                       border: InputBorder.none,
                       filled: true,
                       fillColor: Colors.white,
-                      contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                     ),
                     style: const TextStyle(fontSize: 16),
                     onChanged: (value) {
@@ -687,12 +745,13 @@ class _IsiDataObatPageState extends State<IsiDataObatPage> {
                       Expanded(
                         child: TextFormField(
                           initialValue: med.name,
-                          decoration: const InputDecoration(
+                          decoration: InputDecoration(
                             hintText: 'Nama Obat',
+                            hintStyle: TextStyle(color: Colors.grey.shade400),
                             border: InputBorder.none,
                             filled: true,
                             fillColor: Colors.white,
-                            contentPadding: EdgeInsets.symmetric(
+                            contentPadding: const EdgeInsets.symmetric(
                               horizontal: 16,
                               vertical: 10,  
                             ),
@@ -782,12 +841,13 @@ class _IsiDataObatPageState extends State<IsiDataObatPage> {
                   const SizedBox(height: 12),
                   TextFormField(
                     initialValue: med.keterangan,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       hintText: 'Keterangan (Optional)',
+                      hintStyle: TextStyle(color: Colors.grey.shade400),
                       border: InputBorder.none,
                       filled: true,
                       fillColor: Colors.white,
-                      contentPadding: EdgeInsets.symmetric(
+                      contentPadding: const EdgeInsets.symmetric(
                         horizontal: 16,
                         vertical: 10,
                       ),
@@ -840,12 +900,13 @@ class _IsiDataObatPageState extends State<IsiDataObatPage> {
                       Expanded(
                         child: TextFormField(
                           initialValue: med.name,
-                          decoration: const InputDecoration(
+                          decoration: InputDecoration(
                             hintText: 'Nama Obat',
+                            hintStyle: TextStyle(color: Colors.grey.shade400),
                             border: InputBorder.none,
                             filled: true,
                             fillColor: Colors.white,
-                            contentPadding: EdgeInsets.symmetric(
+                            contentPadding: const EdgeInsets.symmetric(
                               horizontal: 16,
                               vertical: 10,  
                             ),
@@ -935,12 +996,13 @@ class _IsiDataObatPageState extends State<IsiDataObatPage> {
                   const SizedBox(height: 12),
                   TextFormField(
                     initialValue: med.keterangan,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       hintText: 'Keterangan (Optional)',
+                      hintStyle: TextStyle(color: Colors.grey.shade400),
                       border: InputBorder.none,
                       filled: true,
                       fillColor: Colors.white,
-                      contentPadding: EdgeInsets.symmetric(
+                      contentPadding: const EdgeInsets.symmetric(
                         horizontal: 16,
                         vertical: 10,
                       ),
@@ -1004,7 +1066,6 @@ class _IsiDataObatPageState extends State<IsiDataObatPage> {
   }
 }
 
-// Widget untuk border putus-putus (sama seperti sebelumnya)
 class DashedBorderContainer extends StatelessWidget {
   final Widget child;
   final double radius;
